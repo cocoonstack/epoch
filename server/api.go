@@ -101,8 +101,8 @@ func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	// Delete from MySQL.
-	s.store.DeleteTag(r.Context(), name, tag)
+	// Delete from MySQL (best-effort; object storage is source of truth).
+	_ = s.store.DeleteTag(r.Context(), name, tag)
 
 	w.WriteHeader(204)
 }

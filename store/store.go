@@ -351,12 +351,15 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	}
 
 	// Upsert blobs.
-	for _, layer := range append(m.Layers, m.BaseImages...) {
-		s.upsertBlob(ctx, Blob{
+	allLayers := append(m.Layers, m.BaseImages...)
+	for _, layer := range allLayers {
+		if err := s.upsertBlob(ctx, Blob{
 			Digest:    layer.Digest,
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
-		})
+		}); err != nil {
+			log.Printf("[sync] upsert blob %s: %v", layer.Digest[:12], err)
+		}
 	}
 	return nil
 }
@@ -377,7 +380,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 		}
 		repo, exists := cat.Repositories[name]
 		if !exists {
-			s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, id)
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, id)
 			continue
 		}
 		// Clean orphan tags.
@@ -387,9 +390,11 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 		}
 		for tagRows.Next() {
 			var tagName string
-			tagRows.Scan(&tagName)
+			if err := tagRows.Scan(&tagName); err != nil {
+				continue
+			}
 			if _, ok := repo.Tags[tagName]; !ok {
-				s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, id, tagName)
+				_, _ = s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, id, tagName)
 			}
 		}
 		tagRows.Close()

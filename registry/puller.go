@@ -43,17 +43,17 @@ func NewPuller(cocoonRootDir, namespace, configmap string) (*Puller, error) {
 }
 
 // NewPullerFromConfig creates a Puller with explicit object store config.
-func NewPullerFromConfig(cfg *objectstore.Config, cocoonRootDir string) *Puller {
+func NewPullerFromConfig(cfg *objectstore.Config, cocoonRootDir string) (*Puller, error) {
 	cfg.Prefix = "epoch/"
 	client, err := objectstore.New(cfg)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("init object store client: %w", err)
 	}
 	return &Puller{
 		reg:    New(client),
 		paths:  cocoon.NewPaths(cocoonRootDir),
 		pulled: make(map[string]bool),
-	}
+	}, nil
 }
 
 // EnsureSnapshot ensures a snapshot is available locally.

@@ -81,7 +81,7 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.WriteHeader(200)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // HEAD /v2/{name}/manifests/{reference}
@@ -127,7 +127,7 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
 	}
 	w.WriteHeader(200)
-	io.Copy(w, body)
+	_, _ = io.Copy(w, body)
 }
 
 // HEAD /v2/{name}/blobs/{digest}

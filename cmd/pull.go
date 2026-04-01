@@ -47,7 +47,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
 			MaxIdleConnsPerHost: 4,
 			IdleConnTimeout:    90 * time.Second,
 		},
