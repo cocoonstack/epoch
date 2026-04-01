@@ -11,9 +11,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	log "github.com/projecteru2/core/log"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -310,12 +311,12 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	for repoName, repo := range cat.Repositories {
 		repoID, err := s.upsertRepository(ctx, repoName)
 		if err != nil {
-			log.Printf("[sync] upsert repo %s: %v", repoName, err)
+			log.WithFunc("Store.SyncFromCatalog").Infof(ctx, "[sync] upsert repo %s: %v", repoName, err)
 			continue
 		}
 		for tagName := range repo.Tags {
 			if err := s.syncTag(ctx, reg, repoID, repoName, tagName); err != nil {
-				log.Printf("[sync] sync tag %s:%s: %v", repoName, tagName, err)
+				log.WithFunc("Store.SyncFromCatalog").Infof(ctx, "[sync] sync tag %s:%s: %v", repoName, tagName, err)
 			}
 		}
 	}
@@ -359,7 +360,7 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
 		}); err != nil {
-			log.Printf("[sync] upsert blob %s: %v", layer.Digest[:12], err)
+			log.WithFunc("Store.syncTag").Infof(ctx, "[sync] upsert blob %s: %v", layer.Digest[:12], err)
 		}
 	}
 	return nil
@@ -465,7 +466,7 @@ func (s *Store) ValidateToken(plaintext string) bool {
 		return false
 	}
 	if _, err := s.db.Exec(`UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-		log.Printf("[store] token last_used update failed: %v", err)
+		log.WithFunc("Store.ValidateToken").Infof(context.TODO(), "[store] token last_used update failed: %v", err)
 	}
 	return true
 }

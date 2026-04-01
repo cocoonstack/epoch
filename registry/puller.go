@@ -3,9 +3,10 @@ package registry
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
+
+	log "github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/objectstore"
@@ -82,15 +83,15 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 	}
 
 	// Pull from registry.
-	log.Printf("[epoch] pulling snapshot %s ...", ref)
+	log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] pulling snapshot %s ...", ref)
 	start := time.Now()
 	_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
-		log.Printf("[epoch] %s", msg)
+		log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] %s", msg)
 	})
 	if err != nil {
 		return fmt.Errorf("epoch pull %s: %w", ref, err)
 	}
-	log.Printf("[epoch] snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
+	log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
 
 	p.mu.Lock()
 	p.pulled[ref] = true
@@ -108,12 +109,12 @@ func (p *Puller) PreWarm(ctx context.Context, snapshots []string) {
 			go func(n string) {
 				defer wg.Done()
 				if err := p.EnsureSnapshot(ctx, n); err != nil {
-					log.Printf("[epoch] pre-warm %s failed: %v", n, err)
+					log.WithFunc("Puller.PreWarm").Infof(ctx, "[epoch] pre-warm %s failed: %v", n, err)
 				}
 			}(name)
 		}
 		wg.Wait()
-		log.Printf("[epoch] pre-warm complete (%d snapshots)", len(snapshots))
+		log.WithFunc("Puller.PreWarm").Infof(ctx, "[epoch] pre-warm complete (%d snapshots)", len(snapshots))
 	}()
 }
 

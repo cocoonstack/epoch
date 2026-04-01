@@ -22,6 +22,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -30,12 +31,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	log "github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/internal/util"
 )
@@ -72,7 +74,7 @@ func LoadSSOConfig() *SSOConfig {
 
 	cfg := loadProviderConfig(provider)
 	if cfg == nil || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURI == "" || cfg.AuthorizeURL == "" || cfg.TokenURL == "" || cfg.UserInfoURL == "" {
-		log.Printf("[sso] disabled: incomplete %s configuration", provider)
+		log.WithFunc("LoadSSOConfig").Infof(context.TODO(), "[sso] disabled: incomplete %s configuration", provider)
 		return nil
 	}
 
@@ -84,7 +86,7 @@ func LoadSSOConfig() *SSOConfig {
 	if len(cookieKey) == 0 {
 		cookieKey = make([]byte, 32)
 		_, _ = rand.Read(cookieKey)
-		log.Printf("[sso] no SSO_COOKIE_SECRET set, generated random key")
+		log.WithFunc("LoadSSOConfig").Infof(context.TODO(), "[sso] no SSO_COOKIE_SECRET set, generated random key")
 	}
 	cfg.CookieSecret = cookieKey
 	return cfg
@@ -163,7 +165,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		"code":          {code},
 	})
 	if err != nil {
-		log.Printf("[sso] token exchange failed: %v", err)
+		log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] token exchange failed: %v", err)
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
 		return
 	}
@@ -174,12 +176,12 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Error       string `json:"error"`
 	}
 	if unmarshalErr := json.Unmarshal(body, &tok); unmarshalErr != nil {
-		log.Printf("[sso] token response parse failed: %v", unmarshalErr)
+		log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] token response parse failed: %v", unmarshalErr)
 		http.Error(w, "invalid token response", http.StatusBadGateway)
 		return
 	}
 	if tok.AccessToken == "" {
-		log.Printf("[sso] no access_token: %s", body)
+		log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] no access_token: %s", body)
 		http.Error(w, "SSO login failed: "+tok.Error, http.StatusBadGateway)
 		return
 	}
@@ -200,7 +202,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		HostedDomain string `json:"hd"`
 	}
 	if err := json.Unmarshal(body, &user); err != nil {
-		log.Printf("[sso] userinfo parse failed: %v", err)
+		log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] userinfo parse failed: %v", err)
 		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
 		return
 	}
@@ -221,7 +223,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Name: cookieName, Value: signed,
 		Path: "/", MaxAge: cookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
-	log.Printf("[sso] login: %s <%s>", user.Name, user.Email)
+	log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] login: %s <%s>", user.Name, user.Email)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

@@ -11,10 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	log "github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/registry"
 	"github.com/cocoonstack/epoch/store"
@@ -35,13 +36,13 @@ type Server struct {
 func New(reg *registry.Registry, st *store.Store, addr string) *Server {
 	sso := LoadSSOConfig()
 	if sso != nil {
-		log.Printf("[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
+		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
 	} else {
-		log.Printf("[epoch] UI auth disabled")
+		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] UI auth disabled")
 	}
 	regToken := os.Getenv("EPOCH_REGISTRY_TOKEN")
 	if regToken != "" {
-		log.Printf("[epoch] registry token auth enabled")
+		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] registry token auth enabled")
 	}
 	s := &Server{
 		reg:           reg,
@@ -89,7 +90,7 @@ func (s *Server) setupRoutes() {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.Fatalf("ui embed: %v", err)
+		log.WithFunc("Server.setupRoutes").Fatalf(context.TODO(), nil, "ui embed: %v", err)
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
@@ -98,11 +99,11 @@ func (s *Server) setupRoutes() {
 func (s *Server) ListenAndServe() error {
 	// Initial catalog sync.
 	ctx := context.Background()
-	log.Println("[epoch] syncing catalog to MySQL...")
+	log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] syncing catalog to MySQL...")
 	if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-		log.Printf("[epoch] initial sync failed (continuing): %v", err)
+		log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] initial sync failed (continuing): %v", err)
 	} else {
-		log.Println("[epoch] initial sync complete")
+		log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] initial sync complete")
 	}
 
 	// Background sync every 5 minutes.
@@ -111,13 +112,13 @@ func (s *Server) ListenAndServe() error {
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-				log.Printf("[epoch] background sync: %v", err)
+				log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] background sync: %v", err)
 			}
 		}
 	}()
 
 	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
-	log.Printf("[epoch] listening on %s", s.addr)
+	log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] listening on %s", s.addr)
 	srv := &http.Server{ //nolint:gosec // timeouts are handled by the reverse proxy in production
 		Addr:    s.addr,
 		Handler: handler,
@@ -132,7 +133,7 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rw, r)
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
+		log.WithFunc("Server.withLogging").Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
 	})
 }
 
