@@ -8,6 +8,8 @@ import (
 	"github.com/projecteru2/core/log"
 	"github.com/projecteru2/core/types"
 	"github.com/spf13/cobra"
+
+	"github.com/cocoonstack/epoch/internal/util"
 )
 
 var flagRootDir string
@@ -25,10 +27,7 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		level := os.Getenv("EPOCH_LOG_LEVEL")
-		if level == "" {
-			level = "info"
-		}
+		level := util.FirstNonEmpty(os.Getenv("EPOCH_LOG_LEVEL"), "info")
 		return log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, "")
 	}
 

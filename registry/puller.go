@@ -83,15 +83,16 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 	}
 
 	// Pull from registry.
-	log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] pulling snapshot %s ...", ref)
+	logger := log.WithFunc("Puller.EnsureSnapshotTag")
+	logger.Infof(ctx, "[epoch] pulling snapshot %s ...", ref)
 	start := time.Now()
 	_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
-		log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] %s", msg)
+		logger.Infof(ctx, "[epoch] %s", msg)
 	})
 	if err != nil {
 		return fmt.Errorf("epoch pull %s: %w", ref, err)
 	}
-	log.WithFunc("Puller.EnsureSnapshotTag").Infof(ctx, "[epoch] snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
+	logger.Infof(ctx, "[epoch] snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
 
 	p.mu.Lock()
 	p.pulled[ref] = true
@@ -103,18 +104,19 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 // Non-blocking — runs in the background.
 func (p *Puller) PreWarm(ctx context.Context, snapshots []string) {
 	go func() {
+		logger := log.WithFunc("Puller.PreWarm")
 		var wg sync.WaitGroup
 		for _, name := range snapshots {
 			wg.Add(1)
 			go func(n string) {
 				defer wg.Done()
 				if err := p.EnsureSnapshot(ctx, n); err != nil {
-					log.WithFunc("Puller.PreWarm").Warnf(ctx, "[epoch] pre-warm %s failed: %v", n, err)
+					logger.Warnf(ctx, "[epoch] pre-warm %s failed: %v", n, err)
 				}
 			}(name)
 		}
 		wg.Wait()
-		log.WithFunc("Puller.PreWarm").Infof(ctx, "[epoch] pre-warm complete (%d snapshots)", len(snapshots))
+		logger.Infof(ctx, "[epoch] pre-warm complete (%d snapshots)", len(snapshots))
 	}()
 }
 

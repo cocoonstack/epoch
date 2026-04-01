@@ -120,7 +120,7 @@ func (s *Server) apiSync(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/tokens
 func (s *Server) apiListTokens(w http.ResponseWriter, r *http.Request) {
-	tokens, err := s.store.ListTokens()
+	tokens, err := s.store.ListTokens(r.Context())
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -143,7 +143,7 @@ func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 			createdBy = sess.User
 		}
 	}
-	plaintext, err := s.store.CreateToken(req.Name, createdBy)
+	plaintext, err := s.store.CreateToken(r.Context(), req.Name, createdBy)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -159,7 +159,7 @@ func (s *Server) apiDeleteToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid id")
 		return
 	}
-	if err := s.store.DeleteToken(id); err != nil {
+	if err := s.store.DeleteToken(r.Context(), id); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}

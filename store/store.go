@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -186,7 +187,7 @@ func (s *Store) GetRepository(ctx context.Context, name string) (*Repository, er
 		LEFT JOIN tags t ON t.repository_id = r.id
 		WHERE r.name = ?
 		GROUP BY r.id`, name).Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &r, err
@@ -240,7 +241,7 @@ func (s *Store) GetTag(ctx context.Context, repoName, tagName string) (*Tag, err
 		WHERE r.name = ? AND t.name = ?`, repoName, tagName).
 		Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ManifestJSON,
 			&t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	return &t, err
@@ -307,15 +308,16 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 		return fmt.Errorf("get catalog: %w", err)
 	}
 
+	logger := log.WithFunc("Store.SyncFromCatalog")
 	for repoName, repo := range cat.Repositories {
 		repoID, err := s.upsertRepository(ctx, repoName)
 		if err != nil {
-			log.WithFunc("Store.SyncFromCatalog").Warnf(ctx, "[sync] upsert repo %s: %v", repoName, err)
+			logger.Warnf(ctx, "[sync] upsert repo %s: %v", repoName, err)
 			continue
 		}
 		for tagName := range repo.Tags {
 			if err := s.syncTag(ctx, reg, repoID, repoName, tagName); err != nil {
-				log.WithFunc("Store.SyncFromCatalog").Warnf(ctx, "[sync] sync tag %s:%s: %v", repoName, tagName, err)
+				logger.Warnf(ctx, "[sync] sync tag %s:%s: %v", repoName, tagName, err)
 			}
 		}
 	}
@@ -353,13 +355,14 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	allLayers := make([]manifest.Layer, 0, len(m.Layers)+len(m.BaseImages))
 	allLayers = append(allLayers, m.Layers...)
 	allLayers = append(allLayers, m.BaseImages...)
+	logger := log.WithFunc("Store.syncTag")
 	for _, layer := range allLayers {
 		if err := s.upsertBlob(ctx, Blob{
 			Digest:    layer.Digest,
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
 		}); err != nil {
-			log.WithFunc("Store.syncTag").Warnf(ctx, "[sync] upsert blob %s: %v", layer.Digest[:12], err)
+			logger.Warnf(ctx, "[sync] upsert blob %s: %v", layer.Digest[:12], err)
 		}
 	}
 	return nil
@@ -415,14 +418,14 @@ type Token struct {
 }
 
 // CreateToken generates and stores a new token. Returns the plaintext.
-func (s *Store) CreateToken(name, createdBy string) (string, error) {
+func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
 	plaintext := hex.EncodeToString(raw)
 	hash := util.SHA256Hex([]byte(plaintext))
-	_, err := s.db.Exec(`INSERT INTO tokens (name, token_hash, token_plain, created_by) VALUES (?, ?, ?, ?)`,
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (name, token_hash, token_plain, created_by) VALUES (?, ?, ?, ?)`,
 		name, hash, plaintext, createdBy)
 	if err != nil {
 		return "", err
@@ -431,8 +434,8 @@ func (s *Store) CreateToken(name, createdBy string) (string, error) {
 }
 
 // ListTokens returns all tokens with plaintext visible.
-func (s *Store) ListTokens() ([]Token, error) {
-	rows, err := s.db.Query(`SELECT id, name, token_plain, created_by, created_at, last_used FROM tokens ORDER BY id`)
+func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, token_plain, created_by, created_at, last_used FROM tokens ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -452,20 +455,20 @@ func (s *Store) ListTokens() ([]Token, error) {
 }
 
 // DeleteToken removes a token by ID.
-func (s *Store) DeleteToken(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM tokens WHERE id = ?`, id)
+func (s *Store) DeleteToken(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id)
 	return err
 }
 
 // ValidateToken checks if a token exists. Updates last_used on match.
-func (s *Store) ValidateToken(plaintext string) bool {
+func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	hash := util.SHA256Hex([]byte(plaintext))
 	var exists int
-	if err := s.db.QueryRow(`SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists); err != nil {
 		return false
 	}
-	if _, err := s.db.Exec(`UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-		log.WithFunc("Store.ValidateToken").Warnf(context.Background(), "[store] token last_used update failed: %v", err)
+	if _, err := s.db.ExecContext(ctx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
+		log.WithFunc("Store.ValidateToken").Warnf(ctx, "[store] token last_used update failed: %v", err)
 	}
 	return true
 }

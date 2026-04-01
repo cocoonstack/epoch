@@ -122,7 +122,7 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 // Exists checks whether an object exists.
 func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := c.Head(ctx, key)
-	if err == ErrNotFound {
+	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
 	return err == nil, err

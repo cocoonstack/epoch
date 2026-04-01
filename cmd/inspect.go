@@ -19,7 +19,7 @@ func newInspectCmd() *cobra.Command {
 			name, tag := util.ParseRef(args[0])
 
 			var m any
-			if err := apiGet(fmt.Sprintf("/repositories/%s/tags/%s", name, tag), &m); err != nil {
+			if err := apiGet(cmd.Context(), fmt.Sprintf("/repositories/%s/tags/%s", name, tag), &m); err != nil {
 				return err
 			}
 

@@ -43,6 +43,7 @@ func newTagCmd() *cobra.Command {
 		Short: "Create a new tag for an existing snapshot",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			srcName, srcTag := util.ParseRef(args[0])
 			dstName, dstTag := util.ParseRef(args[1])
 
@@ -55,7 +56,7 @@ func newTagCmd() *cobra.Command {
 
 			// Get existing manifest via V2 API.
 			getURL := fmt.Sprintf("%s/v2/%s/manifests/%s", serverURL, srcName, srcTag)
-			req, err := http.NewRequest("GET", getURL, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, getURL, nil)
 			if err != nil {
 				return fmt.Errorf("new request GET manifest: %w", err)
 			}
@@ -77,7 +78,7 @@ func newTagCmd() *cobra.Command {
 
 			// Re-push with new tag.
 			putURL := fmt.Sprintf("%s/v2/%s/manifests/%s", serverURL, dstName, dstTag)
-			putReq, err := http.NewRequest("PUT", putURL, bytes.NewReader(m))
+			putReq, err := http.NewRequestWithContext(ctx, http.MethodPut, putURL, bytes.NewReader(m))
 			if err != nil {
 				return fmt.Errorf("new request PUT manifest: %w", err)
 			}

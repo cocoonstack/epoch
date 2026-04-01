@@ -17,11 +17,12 @@ func newRmCmd() *cobra.Command {
 Blobs are NOT deleted (they may be shared by other tags).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			name, tag := util.ParseRef(args[0])
 			serverURL, token := resolveConfig()
 			client := newRegistryClient()
 
-			req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/api/repositories/%s/tags/%s", serverURL, name, tag), nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/api/repositories/%s/tags/%s", serverURL, name, tag), nil)
 			if err != nil {
 				return fmt.Errorf("new request: %w", err)
 			}

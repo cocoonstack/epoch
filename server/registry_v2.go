@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -156,7 +157,7 @@ func stripSHA256Prefix(s string) string {
 }
 
 func isNotFound(err error) bool {
-	return err == objectstore.ErrNotFound || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404")
+	return errors.Is(err, objectstore.ErrNotFound) || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404")
 }
 
 // PUT /v2/{name}/blobs/sha256:{digest}

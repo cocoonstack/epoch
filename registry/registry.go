@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -235,7 +236,7 @@ func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) 
 // GetCatalog returns the global catalog.
 func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 	body, _, err := r.client.Get(ctx, "catalog.json")
-	if err == objectstore.ErrNotFound {
+	if errors.Is(err, objectstore.ErrNotFound) {
 		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
 	}
 	if err != nil {

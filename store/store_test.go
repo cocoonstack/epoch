@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -28,7 +29,7 @@ func TestValidateTokenIgnoresZeroRowsAffectedOnLastUsedUpdate(t *testing.T) {
 		WithArgs(digest).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	if !s.ValidateToken(token) {
+	if !s.ValidateToken(context.Background(), token) {
 		t.Fatalf("ValidateToken returned false for an existing token when UPDATE affected 0 rows")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -52,7 +53,7 @@ func TestValidateTokenReturnsFalseWhenTokenMissing(t *testing.T) {
 		WithArgs(digest).
 		WillReturnError(sql.ErrNoRows)
 
-	if s.ValidateToken(token) {
+	if s.ValidateToken(context.Background(), token) {
 		t.Fatalf("ValidateToken returned true for a missing token")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

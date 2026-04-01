@@ -35,15 +35,16 @@ type Server struct {
 // New creates a new server.
 func New(reg *registry.Registry, st *store.Store, addr string) *Server {
 	ctx := context.Background()
+	logger := log.WithFunc("server.New")
 	sso := LoadSSOConfig()
 	if sso != nil {
-		log.WithFunc("server.New").Infof(ctx, "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
+		logger.Infof(ctx, "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
 	} else {
-		log.WithFunc("server.New").Info(ctx, "[epoch] UI auth disabled")
+		logger.Info(ctx, "[epoch] UI auth disabled")
 	}
 	regToken := os.Getenv("EPOCH_REGISTRY_TOKEN")
 	if regToken != "" {
-		log.WithFunc("server.New").Info(ctx, "[epoch] registry token auth enabled")
+		logger.Info(ctx, "[epoch] registry token auth enabled")
 	}
 	s := &Server{
 		reg:           reg,
@@ -91,7 +92,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "ui embed: %v", err)
+		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "ui embed")
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
@@ -100,11 +101,12 @@ func (s *Server) setupRoutes(ctx context.Context) {
 func (s *Server) ListenAndServe() error {
 	// Initial catalog sync.
 	ctx := context.Background()
-	log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] syncing catalog to MySQL...")
+	logger := log.WithFunc("Server.ListenAndServe")
+	logger.Info(ctx, "[epoch] syncing catalog to MySQL...")
 	if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-		log.WithFunc("Server.ListenAndServe").Warnf(ctx, "[epoch] initial sync failed (continuing): %v", err)
+		logger.Warnf(ctx, "[epoch] initial sync failed (continuing): %v", err)
 	} else {
-		log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] initial sync complete")
+		logger.Info(ctx, "[epoch] initial sync complete")
 	}
 
 	// Background sync every 5 minutes.
@@ -113,13 +115,13 @@ func (s *Server) ListenAndServe() error {
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-				log.WithFunc("Server.ListenAndServe").Warnf(ctx, "[epoch] background sync: %v", err)
+				logger.Warnf(ctx, "[epoch] background sync: %v", err)
 			}
 		}
 	}()
 
 	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
-	log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] listening on %s", s.addr)
+	logger.Infof(ctx, "[epoch] listening on %s", s.addr)
 	srv := &http.Server{ //nolint:gosec // timeouts are handled by the reverse proxy in production
 		Addr:    s.addr,
 		Handler: handler,

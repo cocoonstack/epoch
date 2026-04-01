@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,10 +22,11 @@ func newLsCmd() *cobra.Command {
 		Long:    `Without arguments, lists all repositories. With a name, lists all tags for that repository.`,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			if len(args) == 1 {
-				return lsTags(args[0])
+				return lsTags(ctx, args[0])
 			}
-			return lsRepos()
+			return lsRepos(ctx)
 		},
 	}
 }
@@ -35,9 +37,9 @@ type repoSummary struct {
 	TotalSize int64  `json:"totalSize"`
 }
 
-func lsRepos() error {
+func lsRepos(ctx context.Context) error {
 	var repos []repoSummary
-	if err := apiGet("/repositories", &repos); err != nil {
+	if err := apiGet(ctx, "/repositories", &repos); err != nil {
 		return err
 	}
 	if len(repos) == 0 {
@@ -53,11 +55,11 @@ func lsRepos() error {
 	return nil
 }
 
-func lsTags(name string) error {
+func lsTags(ctx context.Context, name string) error {
 	var tags []struct {
 		Name string `json:"name"`
 	}
-	if err := apiGet("/repositories/"+name+"/tags", &tags); err != nil {
+	if err := apiGet(ctx, "/repositories/"+name+"/tags", &tags); err != nil {
 		return err
 	}
 	if len(tags) == 0 {
@@ -72,10 +74,10 @@ func lsTags(name string) error {
 }
 
 // apiGet calls GET /api/{path} on the epoch server.
-func apiGet(path string, out any) error {
+func apiGet(ctx context.Context, path string, out any) error {
 	serverURL, token := resolveConfig()
 
-	req, err := http.NewRequest("GET", serverURL+"/api"+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL+"/api"+path, nil)
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
 	}

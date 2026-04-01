@@ -48,6 +48,9 @@ const (
 	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
 
 	providerGoogle = "google"
+
+	cookieName   = "epoch_session"
+	cookieMaxAge = 86400 // 24h
 )
 
 // SSOConfig holds optional UI auth settings loaded from the environment.
@@ -99,11 +102,6 @@ type session struct {
 	Email string `json:"e"`
 	Exp   int64  `json:"x"` // unix timestamp
 }
-
-const (
-	cookieName   = "epoch_session"
-	cookieMaxAge = 86400 // 24h
-)
 
 // --- Routes ---
 
@@ -157,6 +155,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger := log.WithFunc("Server.handleCallback")
+
 	// Exchange code for token
 	tokenResp, err := http.PostForm(s.sso.TokenURL, url.Values{
 		"grant_type":    {"authorization_code"},
@@ -166,7 +166,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		"code":          {code},
 	})
 	if err != nil {
-		log.WithFunc("Server.handleCallback").Errorf(r.Context(), err, "[sso] token exchange failed")
+		logger.Errorf(r.Context(), err, "[sso] token exchange failed")
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
 		return
 	}
@@ -177,18 +177,18 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Error       string `json:"error"`
 	}
 	if unmarshalErr := json.Unmarshal(body, &tok); unmarshalErr != nil {
-		log.WithFunc("Server.handleCallback").Errorf(r.Context(), unmarshalErr, "[sso] token response parse failed")
+		logger.Errorf(r.Context(), unmarshalErr, "[sso] token response parse failed")
 		http.Error(w, "invalid token response", http.StatusBadGateway)
 		return
 	}
 	if tok.AccessToken == "" {
-		log.WithFunc("Server.handleCallback").Warnf(r.Context(), "[sso] no access_token: %s", body)
+		logger.Warnf(r.Context(), "[sso] no access_token: %s", body)
 		http.Error(w, "SSO login failed: "+tok.Error, http.StatusBadGateway)
 		return
 	}
 
 	// Get user info
-	userReq, _ := http.NewRequest("GET", s.sso.UserInfoURL, nil)
+	userReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, s.sso.UserInfoURL, nil)
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := http.DefaultClient.Do(userReq)
 	if err != nil {
@@ -203,7 +203,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		HostedDomain string `json:"hd"`
 	}
 	if err := json.Unmarshal(body, &user); err != nil {
-		log.WithFunc("Server.handleCallback").Errorf(r.Context(), err, "[sso] userinfo parse failed")
+		logger.Errorf(r.Context(), err, "[sso] userinfo parse failed")
 		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
 		return
 	}
@@ -224,7 +224,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Name: cookieName, Value: signed,
 		Path: "/", MaxAge: cookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
-	log.WithFunc("Server.handleCallback").Infof(r.Context(), "[sso] login: %s <%s>", user.Name, user.Email)
+	logger.Infof(r.Context(), "[sso] login: %s <%s>", user.Name, user.Email)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -272,7 +272,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				}
 				// Check DB-managed tokens
 				if !valid && s.store != nil && token != "" && token != auth {
-					valid = s.store.ValidateToken(token)
+					valid = s.store.ValidateToken(r.Context(), token)
 				}
 				if !valid {
 					w.Header().Set("WWW-Authenticate", `Bearer realm="epoch"`)
@@ -291,7 +291,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			// Bearer token provided — validate (same logic as /v2/)
 			valid := s.registryToken != "" && bearerToken == s.registryToken
 			if !valid && s.store != nil {
-				valid = s.store.ValidateToken(bearerToken)
+				valid = s.store.ValidateToken(r.Context(), bearerToken)
 			}
 			if valid {
 				next.ServeHTTP(w, r)
