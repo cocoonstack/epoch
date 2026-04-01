@@ -70,9 +70,11 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 }
 
 // ConfigFromConfigMap reads S3-compatible storage settings from a Kubernetes ConfigMap.
-// Requires kubectl to be available and configured.
+// Uses kubectl subprocess because this function runs in contexts where a full k8s
+// client-go dependency would be too heavy (CLI tools, pullers). The ConfigMap is read
+// once at startup, so the subprocess overhead is negligible.
 func ConfigFromConfigMap(namespace, name, prefix string) (*Config, error) {
-	out, err := exec.Command("kubectl", "get", "configmap", name, "-n", namespace, "-o", "json").Output()
+	out, err := exec.Command("kubectl", "get", "configmap", name, "-n", namespace, "-o", "json").Output() //nolint:gosec // trusted args from caller
 	if err != nil {
 		return nil, fmt.Errorf("kubectl get configmap %s -n %s: %w", name, namespace, err)
 	}
