@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,12 +29,14 @@ func newLsCmd() *cobra.Command {
 	}
 }
 
+type repoSummary struct {
+	Name      string `json:"name"`
+	TagCount  int    `json:"tagCount"`
+	TotalSize int64  `json:"totalSize"`
+}
+
 func lsRepos() error {
-	var repos []struct {
-		Name      string `json:"name"`
-		TagCount  int    `json:"tagCount"`
-		TotalSize int64  `json:"totalSize"`
-	}
+	var repos []repoSummary
 	if err := apiGet("/repositories", &repos); err != nil {
 		return err
 	}
@@ -41,7 +44,7 @@ func lsRepos() error {
 		fmt.Println("No snapshots in registry")
 		return nil
 	}
-	sort.Slice(repos, func(i, j int) bool { return repos[i].Name < repos[j].Name })
+	slices.SortFunc(repos, func(a, b repoSummary) int { return cmp.Compare(a.Name, b.Name) })
 	fmt.Printf("%-35s  %-6s  %s\n", "REPOSITORY", "TAGS", "SIZE")
 	fmt.Println(strings.Repeat("-", 55))
 	for _, r := range repos {

@@ -110,7 +110,7 @@ func (s *Server) ListenAndServe() error {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := s.store.SyncFromCatalog(context.Background(), s.reg); err != nil {
+			if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
 				log.Printf("[epoch] background sync: %v", err)
 			}
 		}

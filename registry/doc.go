@@ -16,7 +16,7 @@
 //	}
 //
 //	// Pre-warm known snapshots at startup (non-blocking).
-//	puller.PreWarm([]string{"sre-agent-bot", "sre-agent-diagnosis"})
+//	puller.PreWarm(ctx, []string{"sre-agent-bot", "sre-agent-diagnosis"})
 //
 // In the provider's CreatePod, before calling `cocoon vm clone`:
 //

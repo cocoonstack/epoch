@@ -100,9 +100,8 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 
 // PreWarm pulls multiple snapshots concurrently at startup.
 // Non-blocking — runs in the background.
-func (p *Puller) PreWarm(snapshots []string) {
+func (p *Puller) PreWarm(ctx context.Context, snapshots []string) {
 	go func() {
-		ctx := context.Background()
 		var wg sync.WaitGroup
 		for _, name := range snapshots {
 			wg.Add(1)
