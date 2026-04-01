@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/projecteru2/core/log"
+	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/objectstore"
@@ -109,7 +109,7 @@ func (p *Puller) PreWarm(ctx context.Context, snapshots []string) {
 			go func(n string) {
 				defer wg.Done()
 				if err := p.EnsureSnapshot(ctx, n); err != nil {
-					log.WithFunc("Puller.PreWarm").Infof(ctx, "[epoch] pre-warm %s failed: %v", n, err)
+					log.WithFunc("Puller.PreWarm").Warnf(ctx, "[epoch] pre-warm %s failed: %v", n, err)
 				}
 			}(name)
 		}

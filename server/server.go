@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	log "github.com/projecteru2/core/log"
+	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/registry"
 	"github.com/cocoonstack/epoch/store"
@@ -34,15 +34,16 @@ type Server struct {
 
 // New creates a new server.
 func New(reg *registry.Registry, st *store.Store, addr string) *Server {
+	ctx := context.Background()
 	sso := LoadSSOConfig()
 	if sso != nil {
-		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
+		log.WithFunc("server.New").Infof(ctx, "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
 	} else {
-		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] UI auth disabled")
+		log.WithFunc("server.New").Info(ctx, "[epoch] UI auth disabled")
 	}
 	regToken := os.Getenv("EPOCH_REGISTRY_TOKEN")
 	if regToken != "" {
-		log.WithFunc("server.New").Infof(context.TODO(), "[epoch] registry token auth enabled")
+		log.WithFunc("server.New").Info(ctx, "[epoch] registry token auth enabled")
 	}
 	s := &Server{
 		reg:           reg,
@@ -52,14 +53,14 @@ func New(reg *registry.Registry, st *store.Store, addr string) *Server {
 		sso:           sso,
 		registryToken: regToken,
 	}
-	s.setupRoutes()
+	s.setupRoutes(ctx)
 	if sso != nil {
 		s.setupAuthRoutes()
 	}
 	return s
 }
 
-func (s *Server) setupRoutes() {
+func (s *Server) setupRoutes(ctx context.Context) {
 	// Registry V2 pull API.
 	s.mux.HandleFunc("GET /v2/", s.v2Check)
 	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
@@ -90,7 +91,7 @@ func (s *Server) setupRoutes() {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(context.TODO(), nil, "ui embed: %v", err)
+		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "ui embed: %v", err)
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
@@ -101,7 +102,7 @@ func (s *Server) ListenAndServe() error {
 	ctx := context.Background()
 	log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] syncing catalog to MySQL...")
 	if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-		log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] initial sync failed (continuing): %v", err)
+		log.WithFunc("Server.ListenAndServe").Warnf(ctx, "[epoch] initial sync failed (continuing): %v", err)
 	} else {
 		log.WithFunc("Server.ListenAndServe").Info(ctx, "[epoch] initial sync complete")
 	}
@@ -112,7 +113,7 @@ func (s *Server) ListenAndServe() error {
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-				log.WithFunc("Server.ListenAndServe").Infof(ctx, "[epoch] background sync: %v", err)
+				log.WithFunc("Server.ListenAndServe").Warnf(ctx, "[epoch] background sync: %v", err)
 			}
 		}
 	}()
