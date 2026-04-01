@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/cocoonstack/epoch/internal/util"
 )
 
 func newRmCmd() *cobra.Command {
@@ -16,7 +18,7 @@ func newRmCmd() *cobra.Command {
 Blobs are NOT deleted (they may be shared by other tags).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, tag := parseRef(args[0])
+			name, tag := util.ParseRef(args[0])
 			serverURL := os.Getenv("EPOCH_SERVER")
 			if serverURL == "" {
 				serverURL = "http://127.0.0.1:4300"

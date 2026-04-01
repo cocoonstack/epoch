@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/cocoonstack/epoch/internal/util"
 )
 
 const DefaultRootDir = "/data01/cocoon"
@@ -119,15 +121,8 @@ func SnapshotExists(paths *Paths, name string) bool {
 	return ok
 }
 
+// HumanSize formats a byte count as a human-readable string.
+// Delegates to internal/util for the shared implementation.
 func HumanSize(b int64) string {
-	switch {
-	case b >= 1<<30:
-		return fmt.Sprintf("%.1fG", float64(b)/(1<<30))
-	case b >= 1<<20:
-		return fmt.Sprintf("%.1fM", float64(b)/(1<<20))
-	case b >= 1<<10:
-		return fmt.Sprintf("%.1fK", float64(b)/(1<<10))
-	default:
-		return fmt.Sprintf("%dB", b)
-	}
+	return util.HumanSize(b)
 }

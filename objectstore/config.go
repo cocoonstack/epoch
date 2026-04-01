@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/cocoonstack/epoch/internal/util"
 )
 
 // Config holds S3-compatible object store settings.
@@ -25,7 +27,7 @@ type Config struct {
 // ConfigFromEnv reads S3-compatible storage settings from the environment.
 // It optionally falls back to ~/.config/epoch/s3.env when values are missing.
 func ConfigFromEnv(prefix string) (*Config, error) {
-	envFile := firstNonEmpty(os.Getenv("EPOCH_S3_ENV_FILE"), filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
+	envFile := util.FirstNonEmpty(os.Getenv("EPOCH_S3_ENV_FILE"), filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
 
 	endpoint := os.Getenv("EPOCH_S3_ENDPOINT")
 	accessKey := os.Getenv("EPOCH_S3_ACCESS_KEY")
@@ -33,17 +35,17 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 	bucket := os.Getenv("EPOCH_S3_BUCKET")
 	region := os.Getenv("EPOCH_S3_REGION")
 	secureRaw := os.Getenv("EPOCH_S3_SECURE")
-	prefixValue := firstNonEmpty(os.Getenv("EPOCH_S3_PREFIX"), prefix)
+	prefixValue := util.FirstNonEmpty(os.Getenv("EPOCH_S3_PREFIX"), prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
 		if err := loadEnvFile(envFile); err == nil {
-			endpoint = firstNonEmpty(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
-			accessKey = firstNonEmpty(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
-			secretKey = firstNonEmpty(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
-			bucket = firstNonEmpty(bucket, os.Getenv("EPOCH_S3_BUCKET"))
-			region = firstNonEmpty(region, os.Getenv("EPOCH_S3_REGION"))
-			secureRaw = firstNonEmpty(secureRaw, os.Getenv("EPOCH_S3_SECURE"))
-			prefixValue = firstNonEmpty(prefixValue, os.Getenv("EPOCH_S3_PREFIX"))
+			endpoint = util.FirstNonEmpty(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
+			accessKey = util.FirstNonEmpty(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
+			secretKey = util.FirstNonEmpty(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
+			bucket = util.FirstNonEmpty(bucket, os.Getenv("EPOCH_S3_BUCKET"))
+			region = util.FirstNonEmpty(region, os.Getenv("EPOCH_S3_REGION"))
+			secureRaw = util.FirstNonEmpty(secureRaw, os.Getenv("EPOCH_S3_SECURE"))
+			prefixValue = util.FirstNonEmpty(prefixValue, os.Getenv("EPOCH_S3_PREFIX"))
 		}
 	}
 
@@ -88,7 +90,7 @@ func ConfigFromConfigMap(namespace, name, prefix string) (*Config, error) {
 	bucket := cm.Data["EPOCH_S3_BUCKET"]
 	region := cm.Data["EPOCH_S3_REGION"]
 	secureRaw := cm.Data["EPOCH_S3_SECURE"]
-	prefixValue := firstNonEmpty(cm.Data["EPOCH_S3_PREFIX"], prefix)
+	prefixValue := util.FirstNonEmpty(cm.Data["EPOCH_S3_PREFIX"], prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
 		return nil, fmt.Errorf("configmap %s/%s missing EPOCH_S3_ENDPOINT, EPOCH_S3_ACCESS_KEY, or EPOCH_S3_BUCKET", namespace, name)
@@ -176,11 +178,3 @@ func userHomeDir() string {
 	return home
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}

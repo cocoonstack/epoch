@@ -8,6 +8,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/cocoonstack/epoch/internal/util"
 )
 
 func newTagCmd() *cobra.Command {
@@ -16,8 +18,8 @@ func newTagCmd() *cobra.Command {
 		Short: "Create a new tag for an existing snapshot",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			srcName, srcTag := parseRef(args[0])
-			dstName, dstTag := parseRef(args[1])
+			srcName, srcTag := util.ParseRef(args[0])
+			dstName, dstTag := util.ParseRef(args[1])
 
 			if dstName != srcName {
 				return fmt.Errorf("cross-repository tagging not supported: %s vs %s", srcName, dstName)

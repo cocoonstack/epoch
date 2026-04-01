@@ -7,7 +7,6 @@ package store
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +17,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registry"
 )
@@ -336,7 +336,7 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	if err != nil {
 		return err
 	}
-	digest := sha256hex(data)
+	digest := util.SHA256Hex(data)
 
 	t := Tag{
 		Name:         tagName,
@@ -401,10 +401,6 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 	}
 }
 
-func sha256hex(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
 
 // --- Token Management ---
 
@@ -425,7 +421,7 @@ func (s *Store) CreateToken(name, createdBy string) (string, error) {
 		return "", err
 	}
 	plaintext := hex.EncodeToString(raw)
-	hash := sha256hex([]byte(plaintext))
+	hash := util.SHA256Hex([]byte(plaintext))
 	_, err := s.db.Exec(`INSERT INTO tokens (name, token_hash, token_plain, created_by) VALUES (?, ?, ?, ?)`,
 		name, hash, plaintext, createdBy)
 	if err != nil {
@@ -463,7 +459,7 @@ func (s *Store) DeleteToken(id int64) error {
 
 // ValidateToken checks if a token exists. Updates last_used on match.
 func (s *Store) ValidateToken(plaintext string) bool {
-	hash := sha256hex([]byte(plaintext))
+	hash := util.SHA256Hex([]byte(plaintext))
 	var exists int
 	if err := s.db.QueryRow(`SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists); err != nil {
 		return false

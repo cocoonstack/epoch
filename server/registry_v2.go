@@ -1,14 +1,13 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/objectstore"
 )
 
@@ -76,7 +75,7 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := sha256Hex(data)
+	digest := util.SHA256Hex(data)
 	w.Header().Set("Content-Type", manifestMediaType)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -99,7 +98,7 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := sha256Hex(data)
+	digest := util.SHA256Hex(data)
 	w.Header().Set("Content-Type", manifestMediaType)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -156,11 +155,6 @@ func stripSHA256Prefix(s string) string {
 	return strings.TrimPrefix(s, "sha256:")
 }
 
-func sha256Hex(data []byte) string {
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:])
-}
-
 func isNotFound(err error) bool {
 	return err == objectstore.ErrNotFound || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404")
 }
@@ -205,7 +199,7 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := sha256Hex(data)
+	digest := util.SHA256Hex(data)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, ref))
 	w.WriteHeader(201)

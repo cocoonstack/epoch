@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cocoonstack/epoch/cocoon"
+	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/manifest"
 )
 
@@ -30,7 +31,7 @@ Requires EPOCH_SERVER (default http://127.0.0.1:4300) and
 EPOCH_REGISTRY_TOKEN environment variables.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, tag := parseRef(args[0])
+			name, tag := util.ParseRef(args[0])
 			return pullViaHTTP(cmd.Context(), name, tag)
 		},
 	}
@@ -199,10 +200,4 @@ func updateSnapshotDB(paths *cocoon.Paths, m *manifest.Manifest, name string) er
 	return paths.WriteSnapshotDB(db)
 }
 
-func parseRef(ref string) (string, string) {
-	if i := strings.LastIndex(ref, ":"); i > 0 {
-		return ref[:i], ref[i+1:]
-	}
-	return ref, "latest"
-}
 
