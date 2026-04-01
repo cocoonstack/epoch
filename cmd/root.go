@@ -1,19 +1,15 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/projecteru2/core/log"
-	"github.com/projecteru2/core/types"
 	"github.com/spf13/cobra"
-
-	"github.com/cocoonstack/epoch/internal/util"
 )
 
 var flagRootDir string
 
+// NewRootCmd creates the root cobra command for epoch.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "epoch",
@@ -23,12 +19,6 @@ func NewRootCmd() *cobra.Command {
 CLI commands talk to the Epoch HTTP server (default http://127.0.0.1:4300).
 Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 		SilenceUsage: true,
-	}
-
-	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		level := util.FirstNonEmpty(os.Getenv("EPOCH_LOG_LEVEL"), "info")
-		return log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, "")
 	}
 
 	root.PersistentFlags().StringVar(&flagRootDir, "root-dir", "/data01/cocoon", "Cocoon root directory (for push/pull local snapshot data)")
@@ -45,6 +35,7 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 	return root
 }
 
+// Execute runs the root command.
 func Execute() {
 	if err := NewRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

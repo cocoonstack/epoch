@@ -12,7 +12,7 @@
 //	// Create puller — reads object store settings from a k8s ConfigMap.
 //	puller, err := registry.NewPuller("/data01/cocoon", "prod", "agent-env")
 //	if err != nil {
-//	    log.Fatalf("epoch puller: %v", err)
+//	    log.WithFunc("main").Fatalf(ctx, err, "epoch puller: %v", err)
 //	}
 //
 //	// Pre-warm known snapshots at startup (non-blocking).

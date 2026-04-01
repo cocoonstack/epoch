@@ -33,18 +33,17 @@ type Server struct {
 }
 
 // New creates a new server.
-func New(reg *registry.Registry, st *store.Store, addr string) *Server {
-	ctx := context.Background()
-	logger := log.WithFunc("server.New")
+func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
+	logger := log.WithFunc("Server.New")
 	sso := LoadSSOConfig()
 	if sso != nil {
-		logger.Infof(ctx, "[epoch] UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
+		logger.Infof(ctx, "UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
 	} else {
-		logger.Info(ctx, "[epoch] UI auth disabled")
+		logger.Info(ctx, "UI auth disabled")
 	}
 	regToken := os.Getenv("EPOCH_REGISTRY_TOKEN")
 	if regToken != "" {
-		logger.Info(ctx, "[epoch] registry token auth enabled")
+		logger.Info(ctx, "registry token auth enabled")
 	}
 	s := &Server{
 		reg:           reg,
@@ -92,36 +91,37 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "ui embed")
+		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
 
 // ListenAndServe starts the server with initial sync and background sync.
-func (s *Server) ListenAndServe() error {
-	// Initial catalog sync.
-	ctx := context.Background()
+func (s *Server) ListenAndServe(ctx context.Context) error {
 	logger := log.WithFunc("Server.ListenAndServe")
-	logger.Info(ctx, "[epoch] syncing catalog to MySQL...")
+
+	// Initial catalog sync.
+	logger.Info(ctx, "syncing catalog to MySQL...")
 	if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-		logger.Warnf(ctx, "[epoch] initial sync failed (continuing): %v", err)
+		logger.Warnf(ctx, "initial sync failed (continuing): %v", err)
 	} else {
-		logger.Info(ctx, "[epoch] initial sync complete")
+		logger.Info(ctx, "initial sync complete")
 	}
 
 	// Background sync every 5 minutes.
 	go func() {
+		bgCtx := context.Background() // goroutine must outlive parent ctx for graceful shutdown
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
-				logger.Warnf(ctx, "[epoch] background sync: %v", err)
+			if err := s.store.SyncFromCatalog(bgCtx, s.reg); err != nil {
+				logger.Warnf(bgCtx, "background sync: %v", err)
 			}
 		}
 	}()
 
 	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
-	logger.Infof(ctx, "[epoch] listening on %s", s.addr)
+	logger.Infof(ctx, "listening on %s", s.addr)
 	srv := &http.Server{ //nolint:gosec // timeouts are handled by the reverse proxy in production
 		Addr:    s.addr,
 		Handler: handler,

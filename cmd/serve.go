@@ -26,6 +26,8 @@ func newServeCmd() *cobra.Command {
 Requires a MySQL database. Start one with:
   cd deploy && docker compose up -d`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			reg, err := registry.NewFromEnv()
 			if err != nil {
 				return fmt.Errorf("init registry: %w", err)
@@ -37,8 +39,8 @@ Requires a MySQL database. Start one with:
 			}
 			defer func() { _ = db.Close() }()
 
-			srv := server.New(reg, db, addr)
-			return srv.ListenAndServe()
+			srv := server.New(ctx, reg, db, addr)
+			return srv.ListenAndServe(ctx)
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", ":8080", "Listen address (host:port)")
