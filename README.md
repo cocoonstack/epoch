@@ -11,6 +11,39 @@ Epoch is a snapshot registry for [Cocoon](https://github.com/cocoonstack/cocoon)
 - **Token management** -- create and revoke bearer tokens from the dashboard
 - **vk-cocoon integration** -- `registry.NewPuller(...)` pulls snapshots on demand before VM creation
 
+## Installation
+
+### Download from GitHub Releases
+
+Download the latest pre-built binary from the [GitHub Releases](https://github.com/cocoonstack/epoch/releases) page:
+
+```bash
+# Linux (amd64)
+curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-linux-amd64
+chmod +x epoch
+sudo mv epoch /usr/local/bin/
+
+# Linux (arm64)
+curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-linux-arm64
+chmod +x epoch
+sudo mv epoch /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-darwin-arm64
+chmod +x epoch
+sudo mv epoch /usr/local/bin/
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/cocoonstack/epoch.git
+cd epoch
+make build
+```
+
+The `epoch` binary will be created in the current directory.
+
 ## Quick start
 
 Start local dependencies:
