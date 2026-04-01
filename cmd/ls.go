@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 
@@ -71,17 +70,17 @@ func lsTags(name string) error {
 
 // apiGet calls GET /api/{path} on the epoch server.
 func apiGet(path string, out any) error {
-	serverURL := os.Getenv("EPOCH_SERVER")
-	if serverURL == "" {
-		serverURL = defaultServerURL
-	}
-	token := os.Getenv("EPOCH_REGISTRY_TOKEN")
+	serverURL, token := resolveConfig()
 
-	req, _ := http.NewRequest("GET", serverURL+"/api"+path, nil)
+	req, err := http.NewRequest("GET", serverURL+"/api"+path, nil)
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := newRegistryClient()
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -39,20 +37,9 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 }
 
 func pullViaHTTP(ctx context.Context, name, tag string) error {
-	serverURL := os.Getenv("EPOCH_SERVER")
-	if serverURL == "" {
-		serverURL = defaultServerURL
-	}
+	serverURL, token := resolveConfig()
 	serverURL = strings.TrimRight(serverURL, "/")
-	token := os.Getenv("EPOCH_REGISTRY_TOKEN")
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
-			MaxIdleConnsPerHost: 4,
-			IdleConnTimeout:     90 * time.Second,
-		},
-	}
+	client := newRegistryClient()
 	paths := cocoon.NewPaths(flagRootDir)
 
 	fmt.Printf("pulling %s:%s from %s ...\n", name, tag, serverURL)

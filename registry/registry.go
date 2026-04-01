@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/cocoonstack/epoch/manifest"
@@ -24,7 +25,8 @@ import (
 
 // Registry is the Epoch snapshot registry.
 type Registry struct {
-	client *objectstore.Client
+	client    *objectstore.Client
+	catalogMu sync.Mutex // guards read-modify-write of catalog.json
 }
 
 // New creates a registry backed by the given object store client.
@@ -62,6 +64,7 @@ func NewFromConfigMap(namespace, configmap string) (*Registry, error) {
 
 // PushBlob uploads a file as a content-addressable blob.
 // Returns the SHA-256 hex digest and size.
+// Computes the hash in a single pass using io.TeeReader to avoid reading the file twice.
 func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64, error) {
 	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {
@@ -75,7 +78,7 @@ func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64
 	}
 	size := info.Size()
 
-	// Compute SHA-256.
+	// Hash in a single pass: read file once, computing SHA-256 as we go.
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", 0, fmt.Errorf("hash %s: %w", filePath, err)
@@ -87,9 +90,11 @@ func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64
 		return digest, size, nil
 	}
 
-	// Rewind and upload (multipart for large files).
-	_ = f.Close() // close before PutLargeFile re-opens
-	if err := r.client.PutLargeFile(ctx, blobKey(digest), filePath); err != nil {
+	// Seek back to beginning and upload.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", 0, fmt.Errorf("seek %s: %w", filePath, err)
+	}
+	if err := r.client.Put(ctx, blobKey(digest), f, size); err != nil {
 		return "", 0, fmt.Errorf("upload blob %s: %w", digest[:12], err)
 	}
 	return digest, size, nil
@@ -103,7 +108,7 @@ func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body i
 		return nil
 	}
 
-	return r.client.PutStream(ctx, blobKey(digest), body, size)
+	return r.client.Put(ctx, blobKey(digest), body, size)
 }
 
 // BlobExists checks if a blob exists in the registry.
@@ -114,7 +119,7 @@ func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) 
 // PullBlob downloads a blob to a local file.
 // Handles both regular and split (>5GB) blobs transparently.
 func (r *Registry) PullBlob(ctx context.Context, digest, destPath string) error {
-	body, _, err := r.client.GetLargeFile(ctx, blobKey(digest))
+	body, _, err := r.client.Get(ctx, blobKey(digest))
 	if err != nil {
 		return fmt.Errorf("get blob %s: %w", digest[:12], err)
 	}
@@ -140,7 +145,7 @@ func (r *Registry) DeleteBlob(ctx context.Context, digest string) error {
 // StreamBlob returns a streaming reader for a blob from object storage.
 // Caller must close the returned ReadCloser.
 func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error) {
-	return r.client.GetLargeFile(ctx, blobKey(digest))
+	return r.client.Get(ctx, blobKey(digest))
 }
 
 // BlobSize returns the actual size of a blob.
@@ -179,7 +184,7 @@ func (r *Registry) PushManifest(ctx context.Context, m *manifest.Manifest) error
 // PushManifestJSON uploads a manifest from raw JSON bytes and updates the catalog.
 func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data []byte) error {
 	key := manifestKey(name, tag)
-	if err := r.client.PutStream(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
+	if err := r.client.Put(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
 		return fmt.Errorf("upload manifest %s:%s: %w", name, tag, err)
 	}
 	return r.updateCatalog(ctx, name, tag)
@@ -249,6 +254,9 @@ func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 }
 
 func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
+	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
+
 	cat, err := r.GetCatalog(ctx)
 	if err != nil {
 		return fmt.Errorf("get catalog: %w", err)
@@ -267,6 +275,9 @@ func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
 }
 
 func (r *Registry) removeCatalogEntry(ctx context.Context, name, tag string) error {
+	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
+
 	cat, err := r.GetCatalog(ctx)
 	if err != nil {
 		return err

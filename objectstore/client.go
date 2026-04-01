@@ -46,11 +46,6 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, size int64
 	return nil
 }
 
-// PutStream uploads an object from a reader.
-func (c *Client) PutStream(ctx context.Context, key string, body io.Reader, size int64) error {
-	return c.Put(ctx, key, body, size)
-}
-
 // PutLargeFile uploads a local file using the client library's multipart support.
 func (c *Client) PutLargeFile(ctx context.Context, key, filePath string) error {
 	_, err := c.client.FPutObject(ctx, c.cfg.Bucket, c.fullKey(key), filePath, minio.PutObjectOptions{
@@ -80,11 +75,6 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, int64, err
 		return nil, 0, fmt.Errorf("stat %s: %w", key, err)
 	}
 	return obj, info.Size, nil
-}
-
-// GetLargeFile returns a stream for an object.
-func (c *Client) GetLargeFile(ctx context.Context, key string) (io.ReadCloser, int64, error) {
-	return c.Get(ctx, key)
 }
 
 // Head returns the size of an object.

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -19,17 +18,17 @@ Blobs are NOT deleted (they may be shared by other tags).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, tag := util.ParseRef(args[0])
-			serverURL := os.Getenv("EPOCH_SERVER")
-			if serverURL == "" {
-				serverURL = defaultServerURL
-			}
-			token := os.Getenv("EPOCH_REGISTRY_TOKEN")
+			serverURL, token := resolveConfig()
+			client := newRegistryClient()
 
-			req, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/repositories/%s/tags/%s", serverURL, name, tag), nil)
+			req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/api/repositories/%s/tags/%s", serverURL, name, tag), nil)
+			if err != nil {
+				return fmt.Errorf("new request: %w", err)
+			}
 			if token != "" {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				return err
 			}

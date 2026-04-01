@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,19 +37,8 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			name := args[0]
 			ctx := cmd.Context()
 
-			serverURL := os.Getenv("EPOCH_SERVER")
-			if serverURL == "" {
-				serverURL = defaultServerURL
-			}
-			token := os.Getenv("EPOCH_REGISTRY_TOKEN")
-
-			client := &http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
-					MaxIdleConnsPerHost: 4,
-					IdleConnTimeout:     90 * time.Second,
-				},
-			}
+			serverURL, token := resolveConfig()
+			client := newRegistryClient()
 			paths := cocoon.NewPaths(flagRootDir)
 
 			// Find snapshot data directory.
