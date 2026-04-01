@@ -69,7 +69,7 @@ func (r *Registry) Pull(ctx context.Context, paths *cocoon.Paths, name, tag stri
 			if err := r.PullBlob(ctx, bi.Digest, destPath); err != nil {
 				return nil, fmt.Errorf("pull base image %s: %w", bi.Filename, err)
 			}
-			os.Chmod(destPath, 0o444)
+			_ = os.Chmod(destPath, 0o444)
 		}
 	}
 

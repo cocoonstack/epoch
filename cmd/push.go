@@ -2,11 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"context"
 	"fmt"
 	"io"
 	"net/http"

@@ -44,7 +44,9 @@ func newTagCmd() *cobra.Command {
 				return fmt.Errorf("get %s:%s: %d", srcName, srcTag, resp.StatusCode)
 			}
 			var m json.RawMessage
-			json.NewDecoder(resp.Body).Decode(&m)
+			if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+				return fmt.Errorf("decode manifest %s:%s: %w", srcName, srcTag, err)
+			}
 
 			// Re-push with new tag.
 			putURL := fmt.Sprintf("%s/v2/%s/manifests/%s", serverURL, dstName, dstTag)

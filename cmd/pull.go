@@ -96,7 +96,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 			if err := httpDownloadBlob(ctx, client, serverURL, token, name, bi.Digest, destPath); err != nil {
 				return fmt.Errorf("download base %s: %w", bi.Filename, err)
 			}
-			os.Chmod(destPath, 0o444)
+			_ = os.Chmod(destPath, 0o444)
 		}
 	}
 

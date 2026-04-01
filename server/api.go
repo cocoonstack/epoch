@@ -77,7 +77,7 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 
 	// Parse manifest JSON for the response.
 	var manifest any
-	json.Unmarshal([]byte(t.ManifestJSON), &manifest)
+	_ = json.Unmarshal([]byte(t.ManifestJSON), &manifest)
 
 	writeJSON(w, 200, map[string]any{
 		"repoName":  t.RepoName,

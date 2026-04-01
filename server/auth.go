@@ -169,7 +169,11 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
 	}
-	json.Unmarshal(body, &tok)
+	if err := json.Unmarshal(body, &tok); err != nil {
+		log.Printf("[sso] token response parse failed: %v", err)
+		http.Error(w, "invalid token response", 502)
+		return
+	}
 	if tok.AccessToken == "" {
 		log.Printf("[sso] no access_token: %s", body)
 		http.Error(w, "SSO login failed: "+tok.Error, 502)
@@ -187,11 +191,15 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	defer userResp.Body.Close()
 	body, _ = io.ReadAll(userResp.Body)
 	var user struct {
-		Name        string `json:"name"`
-		Email       string `json:"email"`
+		Name         string `json:"name"`
+		Email        string `json:"email"`
 		HostedDomain string `json:"hd"`
 	}
-	json.Unmarshal(body, &user)
+	if err := json.Unmarshal(body, &user); err != nil {
+		log.Printf("[sso] userinfo parse failed: %v", err)
+		http.Error(w, "invalid userinfo response", 502)
+		return
+	}
 	if user.Name == "" {
 		user.Name = user.Email
 	}
