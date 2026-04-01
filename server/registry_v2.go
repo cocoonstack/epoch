@@ -118,7 +118,7 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 		v2Error(w, 500, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Docker-Content-Digest", "sha256:"+dgst)

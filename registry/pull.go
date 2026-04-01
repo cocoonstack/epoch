@@ -28,14 +28,14 @@ func (r *Registry) Pull(ctx context.Context, paths *cocoon.Paths, name, tag stri
 	sid := m.SnapshotID
 	dataDir := paths.SnapshotDataDir(sid)
 
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
-		return nil, fmt.Errorf("mkdir %s: %w", dataDir, err)
+	if mkdirErr := os.MkdirAll(dataDir, 0o750); mkdirErr != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", dataDir, mkdirErr)
 	}
 
 	// Download snapshot layers.
 	for _, layer := range m.Layers {
 		destPath := filepath.Join(dataDir, layer.Filename)
-		if _, err := os.Stat(destPath); err == nil {
+		if _, statErr := os.Stat(destPath); statErr == nil {
 			if progress != nil {
 				progress(fmt.Sprintf("  %s already exists, skipping", layer.Filename))
 			}
@@ -44,20 +44,20 @@ func (r *Registry) Pull(ctx context.Context, paths *cocoon.Paths, name, tag stri
 		if progress != nil {
 			progress(fmt.Sprintf("  downloading %s (%s)...", layer.Filename, cocoon.HumanSize(layer.Size)))
 		}
-		if err := r.PullBlob(ctx, layer.Digest, destPath); err != nil {
-			return nil, fmt.Errorf("pull blob %s: %w", layer.Filename, err)
+		if pullErr := r.PullBlob(ctx, layer.Digest, destPath); pullErr != nil {
+			return nil, fmt.Errorf("pull blob %s: %w", layer.Filename, pullErr)
 		}
 	}
 
 	// Download base images.
-	if len(m.BaseImages) > 0 {
+	if len(m.BaseImages) > 0 { //nolint:nestif // sequential download logic with progress reporting
 		blobDir := paths.CloudimgBlobDir()
-		if err := os.MkdirAll(blobDir, 0o750); err != nil {
-			return nil, fmt.Errorf("mkdir %s: %w", blobDir, err)
+		if blobMkdirErr := os.MkdirAll(blobDir, 0o750); blobMkdirErr != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", blobDir, blobMkdirErr)
 		}
 		for _, bi := range m.BaseImages {
 			destPath := filepath.Join(blobDir, bi.Filename)
-			if _, err := os.Stat(destPath); err == nil {
+			if _, statErr := os.Stat(destPath); statErr == nil {
 				if progress != nil {
 					progress(fmt.Sprintf("  base image %s already exists, skipping", bi.Filename))
 				}
@@ -66,10 +66,10 @@ func (r *Registry) Pull(ctx context.Context, paths *cocoon.Paths, name, tag stri
 			if progress != nil {
 				progress(fmt.Sprintf("  downloading base image %s (%s)...", truncate(bi.Filename, 16), cocoon.HumanSize(bi.Size)))
 			}
-			if err := r.PullBlob(ctx, bi.Digest, destPath); err != nil {
-				return nil, fmt.Errorf("pull base image %s: %w", bi.Filename, err)
+			if biPullErr := r.PullBlob(ctx, bi.Digest, destPath); biPullErr != nil {
+				return nil, fmt.Errorf("pull base image %s: %w", bi.Filename, biPullErr)
 			}
-			_ = os.Chmod(destPath, 0o444)
+			_ = os.Chmod(destPath, 0o444) //nolint:gosec // read-only for base images is intentional
 		}
 	}
 

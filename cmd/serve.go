@@ -35,7 +35,7 @@ Requires a MySQL database. Start one with:
 			if err != nil {
 				return fmt.Errorf("init mysql: %w", err)
 			}
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 
 			srv := server.New(reg, db, addr)
 			return srv.ListenAndServe()

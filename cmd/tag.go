@@ -12,6 +12,8 @@ import (
 	"github.com/cocoonstack/epoch/internal/util"
 )
 
+const defaultServerURL = "http://127.0.0.1:4300"
+
 func newTagCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "tag <name>:<existing-tag> <name>:<new-tag>",
@@ -27,7 +29,7 @@ func newTagCmd() *cobra.Command {
 
 			serverURL := os.Getenv("EPOCH_SERVER")
 			if serverURL == "" {
-				serverURL = "http://127.0.0.1:4300"
+				serverURL = defaultServerURL
 			}
 			token := os.Getenv("EPOCH_REGISTRY_TOKEN")
 
@@ -41,13 +43,13 @@ func newTagCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != 200 {
 				return fmt.Errorf("get %s:%s: %d", srcName, srcTag, resp.StatusCode)
 			}
 			var m json.RawMessage
-			if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-				return fmt.Errorf("decode manifest %s:%s: %w", srcName, srcTag, err)
+			if decErr := json.NewDecoder(resp.Body).Decode(&m); decErr != nil {
+				return fmt.Errorf("decode manifest %s:%s: %w", srcName, srcTag, decErr)
 			}
 
 			// Re-push with new tag.
@@ -61,7 +63,7 @@ func newTagCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			putResp.Body.Close()
+			_ = putResp.Body.Close()
 			if putResp.StatusCode >= 400 {
 				return fmt.Errorf("put %s:%s: %d", dstName, dstTag, putResp.StatusCode)
 			}

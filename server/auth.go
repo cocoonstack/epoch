@@ -42,8 +42,10 @@ import (
 
 const (
 	defaultGoogleAuthorizeURL = "https://accounts.google.com/o/oauth2/v2/auth"
-	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
+	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token" //nolint:gosec // not a credential, just a URL
 	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
+
+	providerGoogle = "google"
 )
 
 // SSOConfig holds optional UI auth settings loaded from the environment.
@@ -96,7 +98,7 @@ type session struct {
 }
 
 const (
-	cookieName = "epoch_session"
+	cookieName   = "epoch_session"
 	cookieMaxAge = 86400 // 24h
 )
 
@@ -111,7 +113,7 @@ func (s *Server) setupAuthRoutes() {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.sso == nil {
-		http.Error(w, "UI auth not configured", 501)
+		http.Error(w, "UI auth not configured", http.StatusNotImplemented)
 		return
 	}
 	state := randomState()
@@ -126,7 +128,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"scope":         {util.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
 		"state":         {state},
 	}
-	if s.sso.Provider == "google" && s.sso.HostedDomain != "" {
+	if s.sso.Provider == providerGoogle && s.sso.HostedDomain != "" {
 		params.Set("hd", s.sso.HostedDomain)
 	}
 	http.Redirect(w, r, s.sso.AuthorizeURL+"?"+params.Encode(), http.StatusFound)
@@ -134,13 +136,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if s.sso == nil {
-		http.Error(w, "UI auth not configured", 501)
+		http.Error(w, "UI auth not configured", http.StatusNotImplemented)
 		return
 	}
 	// Verify state
 	stateCookie, err := r.Cookie("sso_state")
 	if err != nil || stateCookie.Value == "" || stateCookie.Value != r.URL.Query().Get("state") {
-		http.Error(w, "invalid state", 403)
+		http.Error(w, "invalid state", http.StatusForbidden)
 		return
 	}
 	// Clear state cookie
@@ -162,23 +164,23 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Printf("[sso] token exchange failed: %v", err)
-		http.Error(w, "token exchange failed", 502)
+		http.Error(w, "token exchange failed", http.StatusBadGateway)
 		return
 	}
-	defer tokenResp.Body.Close()
+	defer func() { _ = tokenResp.Body.Close() }()
 	body, _ := io.ReadAll(tokenResp.Body)
 	var tok struct {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
 	}
-	if err := json.Unmarshal(body, &tok); err != nil {
-		log.Printf("[sso] token response parse failed: %v", err)
-		http.Error(w, "invalid token response", 502)
+	if unmarshalErr := json.Unmarshal(body, &tok); unmarshalErr != nil {
+		log.Printf("[sso] token response parse failed: %v", unmarshalErr)
+		http.Error(w, "invalid token response", http.StatusBadGateway)
 		return
 	}
 	if tok.AccessToken == "" {
 		log.Printf("[sso] no access_token: %s", body)
-		http.Error(w, "SSO login failed: "+tok.Error, 502)
+		http.Error(w, "SSO login failed: "+tok.Error, http.StatusBadGateway)
 		return
 	}
 
@@ -187,10 +189,10 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := http.DefaultClient.Do(userReq)
 	if err != nil {
-		http.Error(w, "userinfo failed", 502)
+		http.Error(w, "userinfo failed", http.StatusBadGateway)
 		return
 	}
-	defer userResp.Body.Close()
+	defer func() { _ = userResp.Body.Close() }()
 	body, _ = io.ReadAll(userResp.Body)
 	var user struct {
 		Name         string `json:"name"`
@@ -199,7 +201,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(body, &user); err != nil {
 		log.Printf("[sso] userinfo parse failed: %v", err)
-		http.Error(w, "invalid userinfo response", 502)
+		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
 		return
 	}
 	if user.Name == "" {
@@ -256,7 +258,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		}
 
 		// /v2/ — Bearer token auth for machine clients
-		if strings.HasPrefix(path, "/v2/") {
+		if strings.HasPrefix(path, "/v2/") { //nolint:nestif // auth middleware has inherent branching
 			if s.registryToken != "" || s.store != nil {
 				auth := r.Header.Get("Authorization")
 				token := strings.TrimPrefix(auth, "Bearer ")
@@ -369,7 +371,7 @@ func randomState() string {
 func detectProvider() string {
 	switch {
 	case os.Getenv("GOOGLE_OAUTH_CLIENT_ID") != "":
-		return "google"
+		return providerGoogle
 	case os.Getenv("SSO_CLIENT_ID") != "":
 		return "oidc"
 	default:
@@ -379,9 +381,9 @@ func detectProvider() string {
 
 func loadProviderConfig(provider string) *SSOConfig {
 	switch provider {
-	case "google":
+	case providerGoogle:
 		return &SSOConfig{
-			Provider:     "google",
+			Provider:     providerGoogle,
 			ClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
 			RedirectURI:  os.Getenv("GOOGLE_OAUTH_REDIRECT_URI"),

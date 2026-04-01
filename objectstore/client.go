@@ -73,7 +73,7 @@ func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, int64, err
 	}
 	info, err := obj.Stat()
 	if err != nil {
-		obj.Close()
+		_ = obj.Close()
 		if isNotFound(err) {
 			return nil, 0, ErrNotFound
 		}

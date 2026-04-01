@@ -63,6 +63,6 @@ type Catalog struct {
 
 // Repository tracks tags for a snapshot name.
 type Repository struct {
-	Tags      map[string]string `json:"tags"`      // tag → manifest digest
+	Tags      map[string]string `json:"tags"` // tag → manifest digest
 	UpdatedAt time.Time         `json:"updatedAt"`
 }

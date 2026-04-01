@@ -63,11 +63,11 @@ func NewFromConfigMap(namespace, configmap string) (*Registry, error) {
 // PushBlob uploads a file as a content-addressable blob.
 // Returns the SHA-256 hex digest and size.
 func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64, error) {
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {
 		return "", 0, fmt.Errorf("open %s: %w", filePath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -88,7 +88,7 @@ func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64
 	}
 
 	// Rewind and upload (multipart for large files).
-	f.Close() // close before PutLargeFile re-opens
+	_ = f.Close() // close before PutLargeFile re-opens
 	if err := r.client.PutLargeFile(ctx, blobKey(digest), filePath); err != nil {
 		return "", 0, fmt.Errorf("upload blob %s: %w", digest[:12], err)
 	}
@@ -118,13 +118,13 @@ func (r *Registry) PullBlob(ctx context.Context, digest, destPath string) error 
 	if err != nil {
 		return fmt.Errorf("get blob %s: %w", digest[:12], err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
-	f, err := os.Create(destPath)
+	f, err := os.Create(destPath) //nolint:gosec // destPath is from trusted snapshot data dir
 	if err != nil {
 		return fmt.Errorf("create %s: %w", destPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(f, body); err != nil {
 		return fmt.Errorf("write %s: %w", destPath, err)
@@ -154,7 +154,7 @@ func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	return io.ReadAll(body)
 }
 
@@ -191,7 +191,7 @@ func (r *Registry) PullManifest(ctx context.Context, name, tag string) (*manifes
 	if err != nil {
 		return nil, fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	var m manifest.Manifest
 	if err := json.NewDecoder(body).Decode(&m); err != nil {
@@ -236,7 +236,7 @@ func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	var cat manifest.Catalog
 	if err := json.NewDecoder(body).Decode(&cat); err != nil {

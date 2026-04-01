@@ -96,7 +96,6 @@ func (s *Store) migrate() error {
 			last_used   TIMESTAMP NULL,
 			INDEX idx_hash (token_hash)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -104,7 +103,7 @@ func (s *Store) migrate() error {
 		}
 	}
 	// Migration: add token_plain column (ignore error if already exists).
-	s.db.Exec(`ALTER TABLE tokens ADD COLUMN token_plain VARCHAR(255) NOT NULL DEFAULT '' AFTER token_hash`)
+	_, _ = s.db.Exec(`ALTER TABLE tokens ADD COLUMN token_plain VARCHAR(255) NOT NULL DEFAULT '' AFTER token_hash`)
 	return nil
 }
 
@@ -164,7 +163,7 @@ func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var repos []Repository
 	for rows.Next() {
@@ -216,7 +215,7 @@ func (s *Store) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tags []Tag
 	for rows.Next() {
@@ -351,7 +350,9 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	}
 
 	// Upsert blobs.
-	allLayers := append(m.Layers, m.BaseImages...)
+	allLayers := make([]manifest.Layer, 0, len(m.Layers)+len(m.BaseImages))
+	allLayers = append(allLayers, m.Layers...)
+	allLayers = append(allLayers, m.BaseImages...)
 	for _, layer := range allLayers {
 		if err := s.upsertBlob(ctx, Blob{
 			Digest:    layer.Digest,
@@ -370,7 +371,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var id int64
@@ -397,10 +398,9 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 				_, _ = s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, id, tagName)
 			}
 		}
-		tagRows.Close()
+		_ = tagRows.Close()
 	}
 }
-
 
 // --- Token Management ---
 
@@ -436,7 +436,7 @@ func (s *Store) ListTokens() ([]Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var tokens []Token
 	for rows.Next() {
 		var t Token

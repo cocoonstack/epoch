@@ -50,9 +50,15 @@ func NewPaths(rootDir string) *Paths {
 	return &Paths{RootDir: rootDir}
 }
 
-func (p *Paths) SnapshotDBFile() string          { return filepath.Join(p.RootDir, "snapshot", "db", "snapshots.json") }
-func (p *Paths) SnapshotDataDir(id string) string { return filepath.Join(p.RootDir, "snapshot", "localfile", id) }
-func (p *Paths) CloudimgBlobDir() string          { return filepath.Join(p.RootDir, "cloudimg", "blobs") }
+func (p *Paths) SnapshotDBFile() string {
+	return filepath.Join(p.RootDir, "snapshot", "db", "snapshots.json")
+}
+
+func (p *Paths) SnapshotDataDir(id string) string {
+	return filepath.Join(p.RootDir, "snapshot", "localfile", id)
+}
+
+func (p *Paths) CloudimgBlobDir() string { return filepath.Join(p.RootDir, "cloudimg", "blobs") }
 
 // ReadSnapshotDB reads Cocoon's snapshots.json.
 func (p *Paths) ReadSnapshotDB() (*SnapshotDB, error) {
@@ -90,7 +96,7 @@ func (p *Paths) WriteSnapshotDB(db *SnapshotDB) error {
 		return err
 	}
 	tmp := p.SnapshotDBFile() + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, p.SnapshotDBFile())

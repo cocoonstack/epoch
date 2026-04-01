@@ -80,14 +80,14 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal([]byte(t.ManifestJSON), &manifest)
 
 	writeJSON(w, 200, map[string]any{
-		"repoName":  t.RepoName,
-		"tag":       t.Name,
-		"digest":    t.Digest,
-		"totalSize": t.TotalSize,
+		"repoName":   t.RepoName,
+		"tag":        t.Name,
+		"digest":     t.Digest,
+		"totalSize":  t.TotalSize,
 		"layerCount": t.LayerCount,
-		"pushedAt":  t.PushedAt,
-		"syncedAt":  t.SyncedAt,
-		"manifest":  manifest,
+		"pushedAt":   t.PushedAt,
+		"syncedAt":   t.SyncedAt,
+		"manifest":   manifest,
 	})
 }
 

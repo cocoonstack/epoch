@@ -21,7 +21,7 @@ Blobs are NOT deleted (they may be shared by other tags).`,
 			name, tag := util.ParseRef(args[0])
 			serverURL := os.Getenv("EPOCH_SERVER")
 			if serverURL == "" {
-				serverURL = "http://127.0.0.1:4300"
+				serverURL = defaultServerURL
 			}
 			token := os.Getenv("EPOCH_REGISTRY_TOKEN")
 
@@ -33,7 +33,7 @@ Blobs are NOT deleted (they may be shared by other tags).`,
 			if err != nil {
 				return err
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode >= 400 {
 				return fmt.Errorf("delete %s:%s: %d", name, tag, resp.StatusCode)
 			}

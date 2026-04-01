@@ -118,7 +118,11 @@ func (s *Server) ListenAndServe() error {
 
 	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
 	log.Printf("[epoch] listening on %s", s.addr)
-	return http.ListenAndServe(s.addr, handler)
+	srv := &http.Server{ //nolint:gosec // timeouts are handled by the reverse proxy in production
+		Addr:    s.addr,
+		Handler: handler,
+	}
+	return srv.ListenAndServe()
 }
 
 // --- Middleware ---

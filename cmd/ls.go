@@ -70,10 +70,10 @@ func lsTags(name string) error {
 }
 
 // apiGet calls GET /api/{path} on the epoch server.
-func apiGet(path string, out interface{}) error {
+func apiGet(path string, out any) error {
 	serverURL := os.Getenv("EPOCH_SERVER")
 	if serverURL == "" {
-		serverURL = "http://127.0.0.1:4300"
+		serverURL = defaultServerURL
 	}
 	token := os.Getenv("EPOCH_REGISTRY_TOKEN")
 
@@ -85,7 +85,7 @@ func apiGet(path string, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("API %s: %d", path, resp.StatusCode)
 	}

@@ -80,8 +80,8 @@ func ConfigFromConfigMap(namespace, name, prefix string) (*Config, error) {
 	var cm struct {
 		Data map[string]string `json:"data"`
 	}
-	if err := json.Unmarshal(out, &cm); err != nil {
-		return nil, fmt.Errorf("parse configmap: %w", err)
+	if unmarshalErr := json.Unmarshal(out, &cm); unmarshalErr != nil {
+		return nil, fmt.Errorf("parse configmap: %w", unmarshalErr)
 	}
 
 	endpoint := cm.Data["EPOCH_S3_ENDPOINT"]
@@ -121,7 +121,7 @@ func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 	if raw == "" {
 		return "", false, fmt.Errorf("empty S3 endpoint")
 	}
-	if strings.Contains(raw, "://") {
+	if strings.Contains(raw, "://") { //nolint:nestif // parsing logic requires conditional branching
 		u, err := url.Parse(raw)
 		if err != nil {
 			return "", false, fmt.Errorf("parse EPOCH_S3_ENDPOINT: %w", err)
@@ -131,9 +131,9 @@ func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 		}
 		secure := u.Scheme == "https"
 		if secureRaw != "" {
-			parsed, err := strconv.ParseBool(secureRaw)
-			if err != nil {
-				return "", false, fmt.Errorf("parse EPOCH_S3_SECURE: %w", err)
+			parsed, parseErr := strconv.ParseBool(secureRaw)
+			if parseErr != nil {
+				return "", false, fmt.Errorf("parse EPOCH_S3_SECURE: %w", parseErr)
 			}
 			secure = parsed
 		}
@@ -152,11 +152,11 @@ func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 }
 
 func loadEnvFile(path string) error {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path comes from env var or well-known config location
 	if err != nil {
 		return err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -165,7 +165,7 @@ func loadEnvFile(path string) error {
 		if !ok {
 			continue
 		}
-		os.Setenv(strings.TrimSpace(k), strings.TrimSpace(v))
+		_ = os.Setenv(strings.TrimSpace(k), strings.TrimSpace(v))
 	}
 	return nil
 }

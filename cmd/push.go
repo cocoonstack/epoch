@@ -40,15 +40,15 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 
 			serverURL := os.Getenv("EPOCH_SERVER")
 			if serverURL == "" {
-				serverURL = "http://127.0.0.1:4300"
+				serverURL = defaultServerURL
 			}
 			token := os.Getenv("EPOCH_REGISTRY_TOKEN")
 
 			client := &http.Client{
 				Transport: &http.Transport{
-					TLSClientConfig:    &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
+					TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
 					MaxIdleConnsPerHost: 4,
-					IdleConnTimeout:    90 * time.Second,
+					IdleConnTimeout:     90 * time.Second,
 				},
 			}
 			paths := cocoon.NewPaths(flagRootDir)
@@ -79,9 +79,9 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 					continue
 				}
 				filePath := filepath.Join(dataDir, entry.Name())
-				digest, size, err := pushBlobHTTP(ctx, client, serverURL, token, name, filePath)
-				if err != nil {
-					return fmt.Errorf("push blob %s: %w", entry.Name(), err)
+				digest, size, blobErr := pushBlobHTTP(ctx, client, serverURL, token, name, filePath)
+				if blobErr != nil {
+					return fmt.Errorf("push blob %s: %w", entry.Name(), blobErr)
 				}
 				layers = append(layers, layerInfo{
 					Filename: entry.Name(),
@@ -93,7 +93,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			}
 
 			// Build and push manifest.
-			manifest := map[string]interface{}{
+			manifest := map[string]any{
 				"name":       name,
 				"tag":        tag,
 				"snapshotID": sid,
@@ -115,7 +115,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			if err != nil {
 				return fmt.Errorf("PUT manifest: %w", err)
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode >= 400 {
 				return fmt.Errorf("PUT manifest: %d", resp.StatusCode)
 			}
@@ -133,13 +133,13 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 
 func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, name, filePath string) (string, int64, error) {
 	// Hash file.
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {
 		return "", 0, err
 	}
 	h := sha256.New()
 	size, err := io.Copy(h, f)
-	f.Close()
+	_ = f.Close()
 	if err != nil {
 		return "", 0, err
 	}
@@ -147,24 +147,24 @@ func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, na
 
 	// HEAD check — skip if exists.
 	headURL := fmt.Sprintf("%s/v2/%s/blobs/sha256:%s", serverURL, name, digest)
-	if headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, headURL, nil); err == nil {
+	if headReq, headErr := http.NewRequestWithContext(ctx, http.MethodHead, headURL, nil); headErr == nil {
 		if token != "" {
 			headReq.Header.Set("Authorization", "Bearer "+token)
 		}
-		if resp, err := client.Do(headReq); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
+		if headResp, doErr := client.Do(headReq); doErr == nil {
+			_ = headResp.Body.Close()
+			if headResp.StatusCode == 200 {
 				return digest, size, nil
 			}
 		}
 	}
 
 	// Upload.
-	f, err = os.Open(filePath)
+	f, err = os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {
 		return "", 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	url := fmt.Sprintf("%s/v2/%s/blobs/sha256:%s", serverURL, name, digest)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
@@ -180,7 +180,7 @@ func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, na
 	if err != nil {
 		return "", 0, fmt.Errorf("PUT blob: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return "", 0, fmt.Errorf("PUT blob %s: %d %s", digest[:12], resp.StatusCode, string(body))

@@ -69,7 +69,7 @@ func (r *Registry) Push(ctx context.Context, paths *cocoon.Paths, snapshotName, 
 
 	// Upload cloudimg base images referenced by this snapshot.
 	var baseImages []manifest.Layer
-	if len(rec.ImageBlobIDs) > 0 {
+	if len(rec.ImageBlobIDs) > 0 { //nolint:nestif // base image upload logic with extension fallback
 		blobDir := paths.CloudimgBlobDir()
 		for hexID := range rec.ImageBlobIDs {
 			for _, ext := range []string{".qcow2", ".raw", ""} {

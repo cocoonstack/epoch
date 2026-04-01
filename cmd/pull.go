@@ -41,16 +41,16 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 func pullViaHTTP(ctx context.Context, name, tag string) error {
 	serverURL := os.Getenv("EPOCH_SERVER")
 	if serverURL == "" {
-		serverURL = "http://127.0.0.1:4300"
+		serverURL = defaultServerURL
 	}
 	serverURL = strings.TrimRight(serverURL, "/")
 	token := os.Getenv("EPOCH_REGISTRY_TOKEN")
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig:    &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // registry may use self-signed certs
 			MaxIdleConnsPerHost: 4,
-			IdleConnTimeout:    90 * time.Second,
+			IdleConnTimeout:     90 * time.Second,
 		},
 	}
 	paths := cocoon.NewPaths(flagRootDir)
@@ -97,7 +97,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 			if err := httpDownloadBlob(ctx, client, serverURL, token, name, bi.Digest, destPath); err != nil {
 				return fmt.Errorf("download base %s: %w", bi.Filename, err)
 			}
-			_ = os.Chmod(destPath, 0o444)
+			_ = os.Chmod(destPath, 0o444) //nolint:gosec // read-only for base images is intentional
 		}
 	}
 
@@ -126,7 +126,7 @@ func httpGetManifest(ctx context.Context, client *http.Client, serverURL, token,
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("GET manifest %s:%s: %d %s", name, tag, resp.StatusCode, string(body))
@@ -151,16 +151,16 @@ func httpDownloadBlob(ctx context.Context, client *http.Client, serverURL, token
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("GET blob %s: %d %s", digest[:12], resp.StatusCode, string(body))
 	}
-	f, err := os.Create(destPath)
+	f, err := os.Create(destPath) //nolint:gosec // destPath is constructed from trusted snapshot data dir
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, err = io.Copy(f, resp.Body)
 	return err
 }
@@ -199,5 +199,3 @@ func updateSnapshotDB(paths *cocoon.Paths, m *manifest.Manifest, name string) er
 
 	return paths.WriteSnapshotDB(db)
 }
-
-
