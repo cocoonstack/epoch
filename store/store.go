@@ -430,9 +430,9 @@ func (s *Store) CreateToken(name, createdBy string) (string, error) {
 	return plaintext, nil
 }
 
-// ListTokens returns all tokens with plaintext masked.
+// ListTokens returns all tokens with plaintext visible.
 func (s *Store) ListTokens() ([]Token, error) {
-	rows, err := s.db.Query(`SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id, name, token_plain, created_by, created_at, last_used FROM tokens ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -440,10 +440,9 @@ func (s *Store) ListTokens() ([]Token, error) {
 	var tokens []Token
 	for rows.Next() {
 		var t Token
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedBy, &t.CreatedAt, &t.LastUsed); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Token, &t.CreatedBy, &t.CreatedAt, &t.LastUsed); err != nil {
 			continue
 		}
-		t.Token = "***"
 		tokens = append(tokens, t)
 	}
 	if tokens == nil {
