@@ -1,15 +1,16 @@
 // Package registry implements the Epoch snapshot registry backed by an
 // S3-compatible object store.
 //
-// # vk-cocoon Integration
+// # Integration
 //
-// vk-cocoon imports this package to automatically pull snapshots before cloning VMs.
+// Import this package when a controller, runtime, or CLI needs to ensure that
+// Cocoon snapshots are present in the local Cocoon storage tree before use.
 //
-// Setup in vk-cocoon's main.go or provider initialization:
+// Example:
 //
 //	import "github.com/cocoonstack/epoch/registry"
 //
-//	// Create puller — reads object store settings from a k8s ConfigMap.
+//	// Create a puller that reads object store settings from a Kubernetes ConfigMap.
 //	puller, err := registry.NewPuller("/var/lib/cocoon", "prod", "agent-env")
 //	if err != nil {
 //	    log.WithFunc("main").Fatalf(ctx, err, "epoch puller: %v", err)
@@ -18,13 +19,13 @@
 //	// Pre-warm known snapshots at startup (non-blocking).
 //	puller.PreWarm(ctx, []string{"sre-agent-bot", "sre-agent-diagnosis"})
 //
-// In the provider's CreatePod, before calling `cocoon vm clone`:
+// Before creating a VM from a snapshot:
 //
-//	// Ensure snapshot is available locally before cloning.
+//	// Ensure the snapshot is present in Cocoon's local snapshot store.
 //	if err := puller.EnsureSnapshot(ctx, image); err != nil {
 //	    return fmt.Errorf("epoch ensure %s: %w", image, err)
 //	}
-//	// Now safe to: cocoon vm clone --cold <image>
+//	// The caller can now resolve the local snapshot data and start the VM.
 //
 // The Puller is thread-safe, idempotent, and caches pull results.
 // Subsequent calls for the same snapshot return immediately.
