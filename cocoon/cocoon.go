@@ -14,7 +14,7 @@ import (
 	"github.com/cocoonstack/epoch/internal/util"
 )
 
-const DefaultRootDir = "/data01/cocoon"
+const DefaultRootDir = "/var/lib/cocoon"
 
 // SnapshotDB matches Cocoon's snapshots.json format.
 type SnapshotDB struct {

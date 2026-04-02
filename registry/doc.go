@@ -10,7 +10,7 @@
 //	import "github.com/cocoonstack/epoch/registry"
 //
 //	// Create puller — reads object store settings from a k8s ConfigMap.
-//	puller, err := registry.NewPuller("/data01/cocoon", "prod", "agent-env")
+//	puller, err := registry.NewPuller("/var/lib/cocoon", "prod", "agent-env")
 //	if err != nil {
 //	    log.WithFunc("main").Fatalf(ctx, err, "epoch puller: %v", err)
 //	}
