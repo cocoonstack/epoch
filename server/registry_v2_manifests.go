@@ -29,7 +29,7 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.WriteHeader(200)
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) //nolint:gosec // raw registry manifest bytes, not HTML rendering
 }
 
 // HEAD /v2/{name}/manifests/{reference}

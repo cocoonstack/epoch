@@ -81,7 +81,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tokenResp.Body.Close() }()
 	body, _ := io.ReadAll(tokenResp.Body)
 	var tok struct {
-		AccessToken string `json:"access_token"`
+		AccessToken string `json:"access_token"` //nolint:gosec // OAuth response schema field name
 		Error       string `json:"error"`
 	}
 	if unmarshalErr := json.Unmarshal(body, &tok); unmarshalErr != nil {
@@ -98,7 +98,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// Get user info
 	userReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, s.sso.UserInfoURL, nil)
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-	userResp, err := http.DefaultClient.Do(userReq)
+	userResp, err := http.DefaultClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
 	if err != nil {
 		http.Error(w, "userinfo failed", http.StatusBadGateway)
 		return

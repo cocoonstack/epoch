@@ -16,8 +16,8 @@ import (
 // Config holds S3-compatible object store settings.
 type Config struct {
 	Endpoint  string
-	AccessKey string
-	SecretKey string
+	AccessKey string //nolint:gosec // configuration schema field name
+	SecretKey string //nolint:gosec // configuration schema field name
 	Bucket    string
 	Region    string
 	Prefix    string

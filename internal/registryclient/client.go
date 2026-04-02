@@ -164,7 +164,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string, body io.Reader, 
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	return c.httpClient.Do(req)
+	return c.httpClient.Do(req) //nolint:gosec // registry baseURL is configured by trusted caller
 }
 
 func (c *Client) getBytes(ctx context.Context, method, rawURL string, wantStatus int) ([]byte, error) {

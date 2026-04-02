@@ -219,7 +219,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = w.Write(data)
+	_, _ = w.Write(data) //nolint:gosec // marshaled JSON API response, not rendered as HTML
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

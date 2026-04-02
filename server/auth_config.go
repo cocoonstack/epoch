@@ -24,7 +24,7 @@ const (
 type SSOConfig struct {
 	Provider     string
 	ClientID     string
-	ClientSecret string
+	ClientSecret string //nolint:gosec // OAuth configuration schema field name
 	RedirectURI  string
 	AuthorizeURL string
 	TokenURL     string
