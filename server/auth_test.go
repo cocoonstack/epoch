@@ -60,6 +60,24 @@ func TestDetectProvider(t *testing.T) {
 	}
 }
 
+func TestSignAndVerifySessionRoundTrip(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	want := &session{
+		User:  "Alice",
+		Email: "alice@example.com",
+		Exp:   1234567890,
+	}
+
+	signed := signSession(*want, key)
+	got, ok := verifySession(signed, key)
+	if !ok {
+		t.Fatalf("verifySession returned false")
+	}
+	if got.User != want.User || got.Email != want.Email || got.Exp != want.Exp {
+		t.Fatalf("verifySession() = %+v, want %+v", got, want)
+	}
+}
+
 func clearAuthEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
