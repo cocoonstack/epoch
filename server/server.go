@@ -35,7 +35,7 @@ type Server struct {
 // New creates a new server.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
 	logger := log.WithFunc("Server.New")
-	sso := LoadSSOConfig()
+	sso := LoadSSOConfig(ctx)
 	if sso != nil {
 		logger.Infof(ctx, "UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
 	} else {
@@ -110,12 +110,16 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	// Background sync every 5 minutes.
 	go func() {
-		bgCtx := context.Background() // goroutine must outlive parent ctx for graceful shutdown
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			if err := s.store.SyncFromCatalog(bgCtx, s.reg); err != nil {
-				logger.Warnf(bgCtx, "background sync: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
+					logger.Warnf(ctx, "background sync: %v", err)
+				}
 			}
 		}
 	}()

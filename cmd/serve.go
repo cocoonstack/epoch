@@ -33,7 +33,7 @@ Requires a MySQL database. Start one with:
 				return fmt.Errorf("init registry: %w", err)
 			}
 
-			db, err := store.New(dsn)
+			db, err := store.New(ctx, dsn)
 			if err != nil {
 				return fmt.Errorf("init mysql: %w", err)
 			}

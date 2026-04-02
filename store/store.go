@@ -30,7 +30,7 @@ type Store struct {
 }
 
 // New opens a MySQL connection and runs migrations.
-func New(dsn string) (*Store, error) {
+func New(ctx context.Context, dsn string) (*Store, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open mysql: %w", err)
@@ -39,12 +39,12 @@ func New(dsn string) (*Store, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("ping mysql: %w", err)
 	}
 
 	s := &Store{db: db}
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(ctx); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return s, nil
@@ -55,7 +55,7 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) migrate() error {
+func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS repositories (
 			id         BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -99,12 +99,12 @@ func (s *Store) migrate() error {
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 	}
 	for _, stmt := range stmts {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("exec DDL: %w", err)
 		}
 	}
 	// Migration: add token_plain column (ignore error if already exists).
-	_, _ = s.db.Exec(`ALTER TABLE tokens ADD COLUMN token_plain VARCHAR(255) NOT NULL DEFAULT '' AFTER token_hash`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens ADD COLUMN token_plain VARCHAR(255) NOT NULL DEFAULT '' AFTER token_hash`)
 	return nil
 }
 

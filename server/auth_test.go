@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestLoadSSOConfigGoogle(t *testing.T) {
 	t.Setenv("GOOGLE_OAUTH_HOSTED_DOMAIN", "example.com")
 	t.Setenv("SSO_COOKIE_SECRET", "")
 
-	cfg := LoadSSOConfig()
+	cfg := LoadSSOConfig(context.Background())
 	if cfg == nil {
 		t.Fatalf("LoadSSOConfig returned nil")
 	}
@@ -40,7 +41,7 @@ func TestLoadSSOConfigOIDCDisabledWhenIncomplete(t *testing.T) {
 	t.Setenv("SSO_TOKEN_URL", "https://issuer.example/token")
 	t.Setenv("SSO_USERINFO_URL", "https://issuer.example/userinfo")
 
-	if cfg := LoadSSOConfig(); cfg != nil {
+	if cfg := LoadSSOConfig(context.Background()); cfg != nil {
 		t.Fatalf("LoadSSOConfig returned %+v, want nil", cfg)
 	}
 }
