@@ -104,7 +104,7 @@ docker-mysql: ## Start local MySQL via docker compose
 	cd deploy && docker compose up -d mysql
 
 docker-build: ## Build Docker image
-	docker build -t epoch-server -f deploy/Dockerfile .
+	docker build -t epoch-server .
 
 # --- Maintenance ---
 
