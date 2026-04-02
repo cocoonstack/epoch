@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 const DefaultRootDir = "/var/lib/cocoon"

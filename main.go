@@ -8,7 +8,7 @@ import (
 	"github.com/projecteru2/core/types"
 
 	"github.com/cocoonstack/epoch/cmd"
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 func main() {

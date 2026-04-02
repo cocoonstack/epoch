@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cocoonstack/epoch/cocoon"
-	"github.com/cocoonstack/epoch/internal/registryclient"
-	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/registryclient"
+	"github.com/cocoonstack/epoch/util"
 )
 
 func newPullCmd() *cobra.Command {

@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cocoonstack/epoch/cocoon"
-	"github.com/cocoonstack/epoch/internal/registryclient"
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/registryclient"
 )
 
 func newPushCmd() *cobra.Command {

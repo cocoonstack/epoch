@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 // Config holds S3-compatible object store settings.

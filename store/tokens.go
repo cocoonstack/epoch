@@ -7,7 +7,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 // CreateToken generates and stores a new token. Returns the plaintext.

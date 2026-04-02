@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 func newRmCmd() *cobra.Command {

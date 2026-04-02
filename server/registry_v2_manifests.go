@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 // GET /v2/{name}/manifests/{reference}

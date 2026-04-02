@@ -10,7 +10,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/internal/util"
+	"github.com/cocoonstack/epoch/util"
 )
 
 func (s *Server) setupAuthRoutes() {

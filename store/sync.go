@@ -7,9 +7,9 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registry"
+	"github.com/cocoonstack/epoch/util"
 )
 
 // SyncFromCatalog reads the remote catalog and syncs all metadata into MySQL.

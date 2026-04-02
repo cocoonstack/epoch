@@ -3,7 +3,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/cocoonstack/epoch/internal/registryclient"
+	"github.com/cocoonstack/epoch/registryclient"
 )
 
 const defaultServerURL = "http://127.0.0.1:4300"
