@@ -87,7 +87,7 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 	logger.Infof(ctx, "pulling snapshot %s ...", ref)
 	start := time.Now()
 	_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
-		logger.Infof(ctx, "%s", msg)
+		logger.Info(ctx, msg)
 	})
 	if err != nil {
 		return fmt.Errorf("epoch pull %s: %w", ref, err)

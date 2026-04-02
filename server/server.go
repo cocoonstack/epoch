@@ -93,7 +93,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
+		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem")
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// ErrNotFound is returned when an object does not exist in the store.
 var ErrNotFound = errors.New("not found")
 
 // Client wraps an S3-compatible object store client.
