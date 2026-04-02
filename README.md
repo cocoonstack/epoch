@@ -1,6 +1,6 @@
 # epoch
 
-Snapshot registry for [Cocoon](https://github.com/cocoonstack/cocoon) MicroVMs. Stores versioned manifests and content-addressed blobs in any S3-compatible object store, exposes an OCI-style `/v2/` API, and ships a small web UI for browsing repositories and managing access tokens.
+Snapshot registry for [Cocoon](https://github.com/cocoonstack/cocoon) MicroVMs. It stores versioned manifests and content-addressed blobs in any S3-compatible object store, exposes an OCI-style `/v2/` API, and ships a small web UI for browsing repositories and managing access tokens.
 
 ## Overview
 
@@ -76,17 +76,19 @@ make build          # produces ./epoch
 | `EPOCH_S3_SECRET_KEY` | Secret key |
 | `EPOCH_S3_BUCKET` | Bucket name |
 | `EPOCH_S3_REGION` | Region (optional) |
-| `EPOCH_S3_SECURE` | `true` / `false`; inferred from scheme if omitted |
+| `EPOCH_S3_SECURE` | `true` or `false`; inferred from scheme if omitted |
 | `EPOCH_S3_PREFIX` | Key prefix (default `epoch/`) |
 | `EPOCH_S3_ENV_FILE` | Env file path (default `~/.config/epoch/s3.env`) |
 
 ### Authentication
 
 **Registry clients** (`/v2/`):
+
 - Bearer token from `EPOCH_REGISTRY_TOKEN` or tokens created via the UI
 - Tokens are validated by SHA-256 hash against MySQL
 
-**Web UI / control API**:
+**Web UI and control API**:
+
 - Disabled by default (open access)
 - Set `SSO_PROVIDER=google` or `SSO_PROVIDER=oidc` to enable session-based login
 - See [deploy/epoch-server.yaml](deploy/epoch-server.yaml) for the full list of SSO variables
@@ -95,7 +97,7 @@ make build          # produces ./epoch
 
 | Path | Purpose |
 |---|---|
-| `deploy/docker-compose.yaml` | Local MySQL + MinIO |
+| `deploy/docker-compose.yaml` | Local MySQL and MinIO |
 | `deploy/epoch-server.yaml` | Kubernetes Deployment template |
 | `deploy/Dockerfile` | Container image build |
 | `deploy/epoch-server.service` | systemd unit file |
@@ -138,10 +140,10 @@ Push and inspect a snapshot:
 ## Development
 
 ```bash
-make build          # stripped binary
+make build          # build binary
 make test           # race-detected tests with coverage
-make lint           # golangci-lint
-make fmt            # gofumpt + goimports
+make lint           # golangci-lint for linux and darwin
+make fmt            # gofumpt and goimports
 make deps           # tidy modules
 make all            # full pipeline
 make help           # show all targets
@@ -151,10 +153,11 @@ make help           # show all targets
 
 | Project | Role |
 |---|---|
-| [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) | Virtual kubelet provider managing VM lifecycle |
+| [cocoon-common](https://github.com/cocoonstack/cocoon-common) | Shared metadata, Kubernetes, and logging helpers |
 | [cocoon-operator](https://github.com/cocoonstack/cocoon-operator) | CocoonSet and Hibernation CRDs |
 | [cocoon-webhook](https://github.com/cocoonstack/cocoon-webhook) | Admission webhook for sticky scheduling |
 | [glance](https://github.com/cocoonstack/glance) | Web dashboard for VM access |
+| [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) | Virtual kubelet provider managing VM lifecycle |
 
 ## License
 
