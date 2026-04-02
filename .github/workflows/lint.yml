@@ -11,9 +11,6 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -23,12 +20,11 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.9.0
-        env:
-          GOOS: ${{ matrix.goos }}
+      - name: Download dependencies
+        run: go mod download
 
-      - name: Check formatting (gofumpt + goimports)
-        run: golangci-lint fmt --diff
+      - name: Lint
+        run: make lint
+
+      - name: Check formatting
+        run: make fmt-check
