@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cocoonstack/epoch/cocoon"
+	"github.com/cocoonstack/epoch/internal/registryclient"
+	"github.com/cocoonstack/epoch/manifest"
 )
 
 func newPushCmd() *cobra.Command {
@@ -37,7 +37,6 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			name := args[0]
 			ctx := cmd.Context()
 
-			serverURL, token := resolveConfig()
 			client := newRegistryClient()
 			paths := cocoon.NewPaths(flagRootDir)
 
@@ -47,7 +46,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 				return fmt.Errorf("resolve snapshot %s: %w", name, err)
 			}
 			dataDir := paths.SnapshotDataDir(sid)
-			fmt.Printf("pushing %s:%s (id=%s) to %s ...\n", name, tag, sid[:12], serverURL)
+			fmt.Printf("pushing %s:%s (id=%s) to %s ...\n", name, tag, sid[:12], client.BaseURL())
 
 			entries, err := os.ReadDir(dataDir)
 			if err != nil {
@@ -67,7 +66,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 					continue
 				}
 				filePath := filepath.Join(dataDir, entry.Name())
-				digest, size, blobErr := pushBlobHTTP(ctx, client, serverURL, token, name, filePath)
+				digest, size, blobErr := pushBlob(ctx, client, name, filePath)
 				if blobErr != nil {
 					return fmt.Errorf("push blob %s: %w", entry.Name(), blobErr)
 				}
@@ -80,32 +79,29 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 				fmt.Printf("  %s → sha256:%s (%s)\n", entry.Name(), digest[:12], cocoon.HumanSize(size))
 			}
 
-			// Build and push manifest.
-			manifest := map[string]any{
-				"name":       name,
-				"tag":        tag,
-				"snapshotID": sid,
-				"layers":     layers,
-				"totalSize":  totalSize,
-				"createdAt":  time.Now().UTC().Format(time.RFC3339),
+			manifestDoc := manifest.Manifest{
+				SchemaVersion: 1,
+				Name:          name,
+				Tag:           tag,
+				SnapshotID:    sid,
+				Layers:        make([]manifest.Layer, 0, len(layers)),
+				TotalSize:     totalSize,
+				CreatedAt:     time.Now().UTC(),
 			}
-			data, _ := json.MarshalIndent(manifest, "", "  ")
-			url := fmt.Sprintf("%s/v2/%s/manifests/%s", serverURL, name, tag)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+			for _, layer := range layers {
+				manifestDoc.Layers = append(manifestDoc.Layers, manifest.Layer{
+					Filename:  layer.Filename,
+					Digest:    layer.Digest,
+					Size:      layer.Size,
+					MediaType: manifest.MediaTypeForFile(layer.Filename),
+				})
+			}
+			data, err := json.MarshalIndent(manifestDoc, "", "  ")
 			if err != nil {
 				return err
 			}
-			req.Header.Set("Content-Type", "application/vnd.epoch.manifest.v1+json")
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				return fmt.Errorf("PUT manifest: %w", err)
-			}
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				return fmt.Errorf("PUT manifest: %d", resp.StatusCode)
+			if err := client.PutManifestJSON(ctx, name, tag, data); err != nil {
+				return err
 			}
 
 			fmt.Printf("\n=== Pushed %s:%s ===\n", name, tag)
@@ -119,7 +115,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 	return cmd
 }
 
-func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, name, filePath string) (string, int64, error) {
+func pushBlob(ctx context.Context, client *registryclient.Client, name, filePath string) (string, int64, error) {
 	// Hash file.
 	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {
@@ -134,17 +130,12 @@ func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, na
 	digest := hex.EncodeToString(h.Sum(nil))
 
 	// HEAD check — skip if exists.
-	headURL := fmt.Sprintf("%s/v2/%s/blobs/sha256:%s", serverURL, name, digest)
-	if headReq, headErr := http.NewRequestWithContext(ctx, http.MethodHead, headURL, nil); headErr == nil {
-		if token != "" {
-			headReq.Header.Set("Authorization", "Bearer "+token)
-		}
-		if headResp, doErr := client.Do(headReq); doErr == nil {
-			_ = headResp.Body.Close()
-			if headResp.StatusCode == 200 {
-				return digest, size, nil
-			}
-		}
+	exists, err := client.BlobExists(ctx, name, digest)
+	if err != nil {
+		return "", 0, err
+	}
+	if exists {
+		return digest, size, nil
 	}
 
 	// Upload.
@@ -154,24 +145,8 @@ func pushBlobHTTP(ctx context.Context, client *http.Client, serverURL, token, na
 	}
 	defer func() { _ = f.Close() }()
 
-	url := fmt.Sprintf("%s/v2/%s/blobs/sha256:%s", serverURL, name, digest)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
-	if err != nil {
+	if err := client.PutBlob(ctx, name, digest, f, size); err != nil {
 		return "", 0, err
-	}
-	req.ContentLength = size
-	req.Header.Set("Content-Type", "application/octet-stream")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, fmt.Errorf("PUT blob: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", 0, fmt.Errorf("PUT blob %s: %d %s", digest[:12], resp.StatusCode, string(body))
 	}
 	return digest, size, nil
 }

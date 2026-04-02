@@ -2,17 +2,15 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/cocoonstack/epoch/cocoon"
+	"github.com/cocoonstack/epoch/internal/registryclient"
 	"github.com/cocoonstack/epoch/internal/util"
 	"github.com/cocoonstack/epoch/manifest"
 )
@@ -37,15 +35,13 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 }
 
 func pullViaHTTP(ctx context.Context, name, tag string) error {
-	serverURL, token := resolveConfig()
-	serverURL = strings.TrimRight(serverURL, "/")
 	client := newRegistryClient()
 	paths := cocoon.NewPaths(flagRootDir)
 
-	fmt.Printf("pulling %s:%s from %s ...\n", name, tag, serverURL)
+	fmt.Printf("pulling %s:%s from %s ...\n", name, tag, client.BaseURL())
 
 	// 1. Get manifest.
-	m, err := httpGetManifest(ctx, client, serverURL, token, name, tag)
+	m, err := client.GetManifest(ctx, name, tag)
 	if err != nil {
 		return err
 	}
@@ -64,7 +60,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 			continue
 		}
 		fmt.Printf("  downloading %s (%s)...\n", layer.Filename, cocoon.HumanSize(layer.Size))
-		if err := httpDownloadBlob(ctx, client, serverURL, token, name, layer.Digest, destPath); err != nil {
+		if err := downloadBlob(ctx, client, name, layer.Digest, destPath); err != nil {
 			return fmt.Errorf("download %s: %w", layer.Filename, err)
 		}
 	}
@@ -81,7 +77,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 				continue
 			}
 			fmt.Printf("  downloading base image %s (%s)...\n", bi.Filename, cocoon.HumanSize(bi.Size))
-			if err := httpDownloadBlob(ctx, client, serverURL, token, name, bi.Digest, destPath); err != nil {
+			if err := downloadBlob(ctx, client, name, bi.Digest, destPath); err != nil {
 				return fmt.Errorf("download base %s: %w", bi.Filename, err)
 			}
 			_ = os.Chmod(destPath, 0o444) //nolint:gosec // read-only for base images is intentional
@@ -100,55 +96,18 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 	return nil
 }
 
-func httpGetManifest(ctx context.Context, client *http.Client, serverURL, token, name, tag string) (*manifest.Manifest, error) {
-	url := fmt.Sprintf("%s/v2/%s/manifests/%s", serverURL, name, tag)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("GET manifest %s:%s: %d %s", name, tag, resp.StatusCode, string(body))
-	}
-	var m manifest.Manifest
-	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
-		return nil, fmt.Errorf("decode manifest: %w", err)
-	}
-	return &m, nil
-}
-
-func httpDownloadBlob(ctx context.Context, client *http.Client, serverURL, token, name, digest, destPath string) error {
-	url := fmt.Sprintf("%s/v2/%s/blobs/sha256:%s", serverURL, name, digest)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func downloadBlob(ctx context.Context, client *registryclient.Client, name, digest, destPath string) error {
+	body, err := client.GetBlob(ctx, name, digest)
 	if err != nil {
 		return err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("GET blob %s: %d %s", digest[:12], resp.StatusCode, string(body))
-	}
+	defer func() { _ = body.Close() }()
 	f, err := os.Create(destPath) //nolint:gosec // destPath is constructed from trusted snapshot data dir
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	_, err = io.Copy(f, resp.Body)
+	_, err = io.Copy(f, body)
 	return err
 }
 

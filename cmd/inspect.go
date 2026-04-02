@@ -17,9 +17,10 @@ func newInspectCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, tag := util.ParseRef(args[0])
+			client := newRegistryClient()
 
 			var m any
-			if err := apiGet(cmd.Context(), fmt.Sprintf("/repositories/%s/tags/%s", name, tag), &m); err != nil {
+			if err := client.GetJSON(cmd.Context(), fmt.Sprintf("/repositories/%s/tags/%s", name, tag), &m); err != nil {
 				return err
 			}
 

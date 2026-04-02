@@ -10,7 +10,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -125,12 +127,52 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}()
 
 	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
-	logger.Infof(ctx, "listening on %s", s.addr)
-	srv := &http.Server{ //nolint:gosec // timeouts are handled by the reverse proxy in production
-		Addr:    s.addr,
-		Handler: handler,
+	srv := newHTTPServer(ctx, s.addr, handler)
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return err
 	}
-	return srv.ListenAndServe()
+	logger.Infof(ctx, "listening on %s", ln.Addr())
+	return serveOnListener(ctx, srv, ln)
+}
+
+func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {
+	return &http.Server{ //nolint:gosec // timeouts are conservative for local and reverse-proxy deployments
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
+	}
+}
+
+func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) error {
+	defer func() { _ = ln.Close() }()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Serve(ln)
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
 }
 
 // --- Middleware ---
