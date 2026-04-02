@@ -51,3 +51,19 @@ type Token struct {
 	CreatedAt time.Time  `json:"createdAt"`
 	LastUsed  *time.Time `json:"lastUsed,omitempty"`
 }
+
+func (r *Repository) scanSummary(row rowScanner) error {
+	return row.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize)
+}
+
+func (t *Tag) scanSummary(row rowScanner) error {
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+}
+
+func (t *Tag) scanDetails(row rowScanner) error {
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ManifestJSON, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+}
+
+func (t *Token) scan(row rowScanner) error {
+	return row.Scan(&t.ID, &t.Name, &t.Token, &t.CreatedBy, &t.CreatedAt, &t.LastUsed)
+}

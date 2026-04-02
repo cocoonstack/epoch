@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/projecteru2/core/log"
 
@@ -29,7 +32,7 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 			logger.Warnf(ctx, "upsert repo %s: %v", repoName, err)
 			continue
 		}
-		for tagName := range repo.Tags {
+		for _, tagName := range slices.Sorted(maps.Keys(repo.Tags)) {
 			if err := s.syncTag(ctx, reg, repoID, repoName, tagName); err != nil {
 				logger.Warnf(ctx, "sync tag %s:%s: %v", repoName, tagName, err)
 			}
@@ -83,38 +86,36 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 }
 
 func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
-	// Get all repo names from DB.
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name FROM repositories`)
+	type repositoryRef struct {
+		ID   int64
+		Name string
+	}
+
+	repos, err := queryRows(ctx, s.db, `SELECT id, name FROM repositories`, func(rows *sql.Rows, repo *repositoryRef) error {
+		return rows.Scan(&repo.ID, &repo.Name)
+	})
 	if err != nil {
 		return
 	}
-	defer func() { _ = rows.Close() }()
 
-	for rows.Next() {
-		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
-			continue
-		}
-		repo, exists := cat.Repositories[name]
+	for _, repoRef := range repos {
+		repo, exists := cat.Repositories[repoRef.Name]
 		if !exists {
-			_, _ = s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, id)
+			_, _ = s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repoRef.ID)
 			continue
 		}
-		// Clean orphan tags.
-		tagRows, err := s.db.QueryContext(ctx, `SELECT name FROM tags WHERE repository_id = ?`, id)
+
+		tagNames, err := queryRows(ctx, s.db, `SELECT name FROM tags WHERE repository_id = ?`, func(rows *sql.Rows, tagName *string) error {
+			return rows.Scan(tagName)
+		}, repoRef.ID)
 		if err != nil {
 			continue
 		}
-		for tagRows.Next() {
-			var tagName string
-			if err := tagRows.Scan(&tagName); err != nil {
-				continue
-			}
+
+		for _, tagName := range tagNames {
 			if _, ok := repo.Tags[tagName]; !ok {
-				_, _ = s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, id, tagName)
+				_, _ = s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, repoRef.ID, tagName)
 			}
 		}
-		_ = tagRows.Close()
 	}
 }

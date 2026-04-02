@@ -36,7 +36,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	var tokens []Token
 	for rows.Next() {
 		var t Token
-		if err := rows.Scan(&t.ID, &t.Name, &t.Token, &t.CreatedBy, &t.CreatedAt, &t.LastUsed); err != nil {
+		if err := t.scan(rows); err != nil {
 			continue
 		}
 		tokens = append(tokens, t)
