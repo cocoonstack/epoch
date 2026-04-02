@@ -25,7 +25,8 @@
 //	if err := puller.EnsureSnapshot(ctx, image); err != nil {
 //	    return fmt.Errorf("epoch ensure %s: %w", image, err)
 //	}
-//	// The caller can now resolve the local snapshot data and start the VM.
+//	// The caller can now clone from the snapshot name, for example:
+//	// cocoon vm clone --name new-vm snapshot-name
 //
 // The Puller is thread-safe, idempotent, and caches pull results.
 // Subsequent calls for the same snapshot return immediately.
