@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func newInspectCmd() *cobra.Command {
@@ -16,7 +16,7 @@ func newInspectCmd() *cobra.Command {
 		Short: "Show manifest details for a snapshot",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, tag := util.ParseRef(args[0])
+			name, tag := utils.ParseRef(args[0])
 			client := newRegistryClient()
 
 			var m any

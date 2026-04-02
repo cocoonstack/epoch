@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func newRmCmd() *cobra.Command {
@@ -17,7 +17,7 @@ Blobs are NOT deleted (they may be shared by other tags).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			name, tag := util.ParseRef(args[0])
+			name, tag := utils.ParseRef(args[0])
 			client := newRegistryClient()
 			if err := client.Delete(ctx, fmt.Sprintf("/repositories/%s/tags/%s", name, tag)); err != nil {
 				return err

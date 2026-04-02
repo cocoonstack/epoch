@@ -33,6 +33,8 @@ GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
 
 GOFMT := $(LOCALBIN)/gofumpt
 GOIMPORTS := $(LOCALBIN)/goimports
+LINT_GOOS ?= linux darwin
+LINT_GOARCH ?= amd64
 
 ## Tool download targets
 .PHONY: golangci-lint
@@ -79,8 +81,11 @@ coverage: test ## Generate and display coverage report
 vet: ## Run go vet
 	go vet ./...
 
-lint: golangci-lint ## Run golangci-lint
-	$(GOLANGCILINT) run ./...
+lint: golangci-lint ## Run golangci-lint for linux and darwin
+	@for goos in $(LINT_GOOS); do \
+		echo "Running golangci-lint for GOOS=$$goos GOARCH=$(LINT_GOARCH)"; \
+		GOOS=$$goos GOARCH=$(LINT_GOARCH) $(GOLANGCILINT) run ./...; \
+	done
 
 fmt: gofumpt goimports ## Format code with gofumpt and goimports
 	$(GOFMT) -l -w .

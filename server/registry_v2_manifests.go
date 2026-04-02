@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // GET /v2/{name}/manifests/{reference}
@@ -24,7 +24,7 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := util.SHA256Hex(data)
+	digest := utils.SHA256Hex(data)
 	w.Header().Set("Content-Type", manifestMediaType)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -47,7 +47,7 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := util.SHA256Hex(data)
+	digest := utils.SHA256Hex(data)
 	w.Header().Set("Content-Type", manifestMediaType)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
@@ -77,7 +77,7 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := util.SHA256Hex(data)
+	digest := utils.SHA256Hex(data)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
 	w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, ref))
 	w.WriteHeader(201)

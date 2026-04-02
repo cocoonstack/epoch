@@ -9,7 +9,7 @@ import (
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registry"
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // SyncFromCatalog reads the remote catalog and syncs all metadata into MySQL.
@@ -51,7 +51,7 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	if err != nil {
 		return err
 	}
-	digest := util.SHA256Hex(data)
+	digest := utils.SHA256Hex(data)
 
 	t := Tag{
 		Name:         tagName,

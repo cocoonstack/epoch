@@ -9,7 +9,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 const (
@@ -38,7 +38,7 @@ type SSOConfig struct {
 // LoadSSOConfig reads optional UI auth configuration from the environment.
 func LoadSSOConfig(ctx context.Context) *SSOConfig {
 	logger := log.WithFunc("LoadSSOConfig")
-	provider := strings.ToLower(util.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))
+	provider := strings.ToLower(utils.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))
 	if provider == "" {
 		return nil
 	}
@@ -82,11 +82,11 @@ func loadProviderConfig(provider string) *SSOConfig {
 			ClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
 			RedirectURI:  os.Getenv("GOOGLE_OAUTH_REDIRECT_URI"),
-			AuthorizeURL: util.FirstNonEmpty(os.Getenv("SSO_AUTHORIZE_URL"), defaultGoogleAuthorizeURL),
-			TokenURL:     util.FirstNonEmpty(os.Getenv("SSO_TOKEN_URL"), defaultGoogleTokenURL),
-			UserInfoURL:  util.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
+			AuthorizeURL: utils.FirstNonEmpty(os.Getenv("SSO_AUTHORIZE_URL"), defaultGoogleAuthorizeURL),
+			TokenURL:     utils.FirstNonEmpty(os.Getenv("SSO_TOKEN_URL"), defaultGoogleTokenURL),
+			UserInfoURL:  utils.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
 			LogoutURL:    os.Getenv("SSO_LOGOUT_URL"),
-			Scopes:       util.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
+			Scopes:       utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
 			HostedDomain: os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN"),
 		}
 	case "oidc":
@@ -99,7 +99,7 @@ func loadProviderConfig(provider string) *SSOConfig {
 			TokenURL:     os.Getenv("SSO_TOKEN_URL"),
 			UserInfoURL:  os.Getenv("SSO_USERINFO_URL"),
 			LogoutURL:    os.Getenv("SSO_LOGOUT_URL"),
-			Scopes:       util.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
+			Scopes:       utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
 		}
 	default:
 		return nil

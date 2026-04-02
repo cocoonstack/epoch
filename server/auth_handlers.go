@@ -10,7 +10,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func (s *Server) setupAuthRoutes() {
@@ -34,7 +34,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"client_id":     {s.sso.ClientID},
 		"redirect_uri":  {s.sso.RedirectURI},
 		"response_type": {"code"},
-		"scope":         {util.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
+		"scope":         {utils.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
 		"state":         {state},
 	}
 	if s.sso.Provider == providerGoogle && s.sso.HostedDomain != "" {

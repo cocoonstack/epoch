@@ -7,7 +7,7 @@ import (
 
 	"github.com/projecteru2/core/log"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // CreateToken generates and stores a new token. Returns the plaintext.
@@ -17,7 +17,7 @@ func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string
 		return "", err
 	}
 	plaintext := hex.EncodeToString(raw)
-	hash := util.SHA256Hex([]byte(plaintext))
+	hash := utils.SHA256Hex([]byte(plaintext))
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (name, token_hash, token_plain, created_by) VALUES (?, ?, ?, ?)`,
 		name, hash, plaintext, createdBy)
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 
 // ValidateToken checks if a token exists. Updates last_used on match.
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
-	hash := util.SHA256Hex([]byte(plaintext))
+	hash := utils.SHA256Hex([]byte(plaintext))
 	var exists int
 	if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists); err != nil {
 		return false

@@ -12,7 +12,7 @@ import (
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registryclient"
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func newPullCmd() *cobra.Command {
@@ -27,7 +27,7 @@ Requires EPOCH_SERVER (default http://127.0.0.1:4300) and
 EPOCH_REGISTRY_TOKEN environment variables.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name, tag := util.ParseRef(args[0])
+			name, tag := utils.ParseRef(args[0])
 			return pullViaHTTP(cmd.Context(), name, tag)
 		},
 	}

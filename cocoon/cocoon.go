@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cocoonstack/epoch/util"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 const DefaultRootDir = "/var/lib/cocoon"
@@ -130,5 +130,5 @@ func SnapshotExists(paths *Paths, name string) bool {
 // HumanSize formats a byte count as a human-readable string.
 // Delegates to internal/util for the shared implementation.
 func HumanSize(b int64) string {
-	return util.HumanSize(b)
+	return utils.HumanSize(b)
 }

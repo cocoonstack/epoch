@@ -1,5 +1,5 @@
-// Package util provides shared helper functions used across epoch packages.
-package util
+// Package utils provides shared helper functions used across epoch packages.
+package utils
 
 import (
 	"crypto/sha256"
