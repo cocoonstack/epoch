@@ -1,0 +1,20 @@
+[Unit]
+Description=Epoch Snapshot Registry Server
+Documentation=https://github.com/cocoonstack/epoch
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/cocoon
+EnvironmentFile=-/etc/cocoon/epoch-server.env
+ExecStart=/usr/local/bin/epoch serve --addr :4300
+KillMode=process
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

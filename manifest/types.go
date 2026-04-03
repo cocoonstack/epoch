@@ -8,7 +8,10 @@
 //	  catalog.json                   — global index of all repositories
 package manifest
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Manifest describes a snapshot stored in Epoch.
 // Analogous to an OCI image manifest — references content-addressable blobs.
@@ -53,6 +56,31 @@ type Layer struct {
 	Filename string `json:"filename"`
 	// MediaType hints at the content (e.g. "application/vnd.cocoon.disk.qcow2").
 	MediaType string `json:"mediaType,omitempty"`
+}
+
+// IsCloudImage returns true if the manifest describes a direct cloud image
+// (only disk layers, no VM state/config files, no base images).
+func (m *Manifest) IsCloudImage() bool {
+	if m == nil || len(m.Layers) == 0 {
+		return false
+	}
+	if len(m.BaseImages) > 0 || len(m.ImageBlobIDs) > 0 {
+		return false
+	}
+	var hasDiskLayer bool
+	for _, layer := range m.Layers {
+		switch layer.Filename {
+		case "config.json", "state.json", "memory-ranges", "cidata.img":
+			return false
+		}
+		if strings.HasSuffix(layer.Filename, ".qcow2") ||
+			strings.Contains(layer.Filename, ".qcow2.part.") ||
+			strings.HasSuffix(layer.Filename, ".raw") ||
+			strings.Contains(layer.Filename, ".raw.part.") {
+			hasDiskLayer = true
+		}
+	}
+	return hasDiskLayer
 }
 
 // Catalog is the global index of all repositories and their tags.

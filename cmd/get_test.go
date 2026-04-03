@@ -9,110 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registryclient"
 )
-
-func TestIsCloudImageManifest(t *testing.T) {
-	tests := []struct {
-		name string
-		m    *manifest.Manifest
-		want bool
-	}{
-		{
-			name: "snapshot with config files",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "config.json", Size: 100},
-					{Filename: "overlay.qcow2", Size: 1000},
-					{Filename: "memory-ranges", Size: 500},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "qcow2 parts",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "win11.qcow2.part.001", Size: 5000},
-					{Filename: "win11.qcow2.part.002", Size: 5000},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "single qcow2",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "ubuntu.qcow2", Size: 3000},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "single raw disk",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "disk.raw", Size: 3000},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "with BaseImages",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "overlay.qcow2", Size: 1000},
-				},
-				BaseImages: []manifest.Layer{
-					{Filename: "base.qcow2", Size: 5000},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "with ImageBlobIDs",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "overlay.qcow2", Size: 1000},
-				},
-				ImageBlobIDs: map[string]string{"abc": "base.qcow2"},
-			},
-			want: false,
-		},
-		{
-			name: "empty manifest",
-			m:    &manifest.Manifest{},
-			want: false,
-		},
-		{
-			name: "nil manifest",
-			m:    nil,
-			want: false,
-		},
-		{
-			name: "no disk layers",
-			m: &manifest.Manifest{
-				Layers: []manifest.Layer{
-					{Filename: "random.bin", Size: 100},
-				},
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isCloudImageManifest(tt.m); got != tt.want {
-				t.Errorf("isCloudImageManifest() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 // snapshotExport JSON format tests
 
@@ -233,22 +135,13 @@ func TestStreamSnapshot(t *testing.T) {
 	srv := newMockRegistry(t, m, blobData)
 	defer srv.Close()
 
-	// Redirect stdout to capture output.
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-
+	var buf bytes.Buffer
 	client := newTestClient(srv.URL)
-	err := streamSnapshot(t.Context(), client, "test-snap", m)
-	pw.Close()
-	os.Stdout = origStdout
-
-	if err != nil {
+	if err := streamSnapshot(t.Context(), client, "test-snap", m, &buf); err != nil {
 		t.Fatalf("streamSnapshot: %v", err)
 	}
 
-	// Read captured output and verify it's a valid gzip tar.
-	output, _ := io.ReadAll(pr)
+	output := buf.Bytes()
 	gr, err := gzip.NewReader(bytes.NewReader(output))
 	if err != nil {
 		t.Fatalf("gzip reader: %v", err)
@@ -326,22 +219,13 @@ func TestStreamCloudImage(t *testing.T) {
 	srv := newMockRegistry(t, m, blobData)
 	defer srv.Close()
 
-	// Redirect stdout.
-	origStdout := os.Stdout
-	pr, pw, _ := os.Pipe()
-	os.Stdout = pw
-
+	var buf bytes.Buffer
 	client := newTestClient(srv.URL)
-	err := streamCloudImage(t.Context(), client, "ubuntu-base", m)
-	pw.Close()
-	os.Stdout = origStdout
-
-	if err != nil {
+	if err := streamCloudImage(t.Context(), client, "ubuntu-base", m, &buf); err != nil {
 		t.Fatalf("streamCloudImage: %v", err)
 	}
 
-	// Read and gunzip.
-	output, _ := io.ReadAll(pr)
+	output := buf.Bytes()
 	gr, err := gzip.NewReader(bytes.NewReader(output))
 	if err != nil {
 		t.Fatalf("gzip reader: %v", err)

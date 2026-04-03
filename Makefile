@@ -101,7 +101,7 @@ serve: ## Start local development server
 	go run . serve --dsn "epoch:epoch@tcp(127.0.0.1:3306)/epoch?parseTime=true"
 
 docker-mysql: ## Start local MySQL via docker compose
-	cd deploy && docker compose up -d mysql
+	docker compose up -d mysql
 
 docker-build: ## Build Docker image
 	docker build -t epoch-server .

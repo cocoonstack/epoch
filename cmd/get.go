@@ -2,13 +2,13 @@ package cmd
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,34 +38,33 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, tag := utils.ParseRef(args[0])
-			return streamArtifact(cmd.Context(), name, tag)
+			return streamArtifact(cmd.Context(), name, tag, os.Stdout)
 		},
 	}
 }
 
-func streamArtifact(ctx context.Context, name, tag string) error {
+func streamArtifact(ctx context.Context, name, tag string, w io.Writer) error {
 	client := newRegistryClient()
 
 	fmt.Fprintf(os.Stderr, "fetching manifest %s:%s from %s ...\n", name, tag, client.BaseURL())
 
 	m, err := client.GetManifest(ctx, name, tag)
 	if err != nil {
-		return err
+		return fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
 	}
 
-	if isCloudImageManifest(m) {
+	if m.IsCloudImage() {
 		fmt.Fprintf(os.Stderr, "type: cloud image (%d layers, %s)\n", len(m.Layers), utils.HumanSize(m.TotalSize))
-		return streamCloudImage(ctx, client, name, m)
+		return streamCloudImage(ctx, client, name, m, w)
 	}
 
 	fmt.Fprintf(os.Stderr, "type: snapshot (%d layers, %s)\n", len(m.Layers), utils.HumanSize(m.TotalSize))
-	return streamSnapshot(ctx, client, name, m)
+	return streamSnapshot(ctx, client, name, m, w)
 }
 
-// streamSnapshot writes a gzip-compressed tar archive to stdout,
+// streamSnapshot writes a gzip-compressed tar archive to w,
 // compatible with cocoon snapshot import.
-func streamSnapshot(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest) error {
-	// Build cocoon-compatible snapshot.json.
+func streamSnapshot(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
 	blobIDs := make(map[string]struct{}, len(m.ImageBlobIDs))
 	for k := range m.ImageBlobIDs {
 		blobIDs[k] = struct{}{}
@@ -91,10 +90,10 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 	jsonData = append(jsonData, '\n')
 
 	now := time.Now()
-	gw, _ := gzip.NewWriterLevel(os.Stdout, gzip.BestSpeed)
+	bw := bufio.NewWriterSize(w, 256<<10)
+	gw, _ := gzip.NewWriterLevel(bw, gzip.BestSpeed)
 	tw := tar.NewWriter(gw)
 
-	// First entry: snapshot.json.
 	if err := tw.WriteHeader(&tar.Header{
 		Name:    "snapshot.json",
 		Size:    int64(len(jsonData)),
@@ -107,7 +106,6 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 		return fmt.Errorf("write snapshot.json: %w", err)
 	}
 
-	// Stream each layer blob into the tar.
 	for _, layer := range m.Layers {
 		fmt.Fprintf(os.Stderr, "  streaming %s (%s)...\n", layer.Filename, utils.HumanSize(layer.Size))
 
@@ -122,15 +120,19 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 	if err := gw.Close(); err != nil {
 		return fmt.Errorf("close gzip: %w", err)
 	}
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
 
 	fmt.Fprintf(os.Stderr, "done: %s:%s (%s)\n", name, m.Tag, utils.HumanSize(m.TotalSize))
 	return nil
 }
 
-// streamCloudImage writes gzip-compressed qcow2 data to stdout,
+// streamCloudImage writes gzip-compressed qcow2 data to w,
 // compatible with cocoon image import (auto-detects gzip + qcow2 magic).
-func streamCloudImage(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest) error {
-	gw, _ := gzip.NewWriterLevel(os.Stdout, gzip.BestSpeed)
+func streamCloudImage(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
+	bw := bufio.NewWriterSize(w, 256<<10)
+	gw, _ := gzip.NewWriterLevel(bw, gzip.BestSpeed)
 
 	for _, layer := range m.Layers {
 		fmt.Fprintf(os.Stderr, "  streaming %s (%s)...\n", layer.Filename, utils.HumanSize(layer.Size))
@@ -149,6 +151,9 @@ func streamCloudImage(ctx context.Context, client *registryclient.Client, name s
 	if err := gw.Close(); err != nil {
 		return fmt.Errorf("close gzip: %w", err)
 	}
+	if err := bw.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
+	}
 
 	fmt.Fprintf(os.Stderr, "done: %s:%s (%s)\n", name, m.Tag, utils.HumanSize(m.TotalSize))
 	return nil
@@ -162,45 +167,17 @@ func streamBlobToTar(ctx context.Context, client *registryclient.Client, name st
 		Mode:    0o640,
 		ModTime: modTime,
 	}); err != nil {
-		return err
+		return fmt.Errorf("write tar header: %w", err)
 	}
 
 	body, err := client.GetBlob(ctx, name, layer.Digest)
 	if err != nil {
-		return err
+		return fmt.Errorf("get blob: %w", err)
 	}
 	defer body.Close() //nolint:errcheck
 
 	_, err = io.Copy(tw, body)
 	return err
-}
-
-// isCloudImageManifest returns true if the manifest describes a direct cloud image
-// (only disk layers, no VM state/config files).
-func isCloudImageManifest(m *manifest.Manifest) bool {
-	if m == nil || len(m.Layers) == 0 {
-		return false
-	}
-	if len(m.BaseImages) > 0 || len(m.ImageBlobIDs) > 0 {
-		return false
-	}
-	var hasConfig, hasDiskLayer bool
-	for _, layer := range m.Layers {
-		switch layer.Filename {
-		case "config.json", "state.json", "memory-ranges", "cidata.img":
-			hasConfig = true
-		}
-		if strings.HasSuffix(layer.Filename, ".qcow2") ||
-			strings.Contains(layer.Filename, ".qcow2.part.") ||
-			strings.HasSuffix(layer.Filename, ".raw") ||
-			strings.Contains(layer.Filename, ".raw.part.") {
-			hasDiskLayer = true
-		}
-		if hasConfig {
-			return false
-		}
-	}
-	return hasDiskLayer
 }
 
 // snapshotExport matches cocoon's types.SnapshotExport for the snapshot.json envelope.
@@ -210,6 +187,7 @@ type snapshotExport struct {
 }
 
 // snapshotConfig matches cocoon's types.SnapshotConfig.
+// Keep in sync with cocoon/types/snapshot.go.
 type snapshotConfig struct {
 	ID           string              `json:"id,omitempty"`
 	Name         string              `json:"name"`
@@ -220,4 +198,6 @@ type snapshotConfig struct {
 	Memory       int64               `json:"memory,omitempty"`
 	Storage      int64               `json:"storage,omitempty"`
 	NICs         int                 `json:"nics,omitempty"`
+	Network      string              `json:"network,omitempty"`
+	Windows      bool                `json:"windows,omitempty"`
 }
