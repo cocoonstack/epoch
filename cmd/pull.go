@@ -59,7 +59,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 			fmt.Printf("  %s exists, skip\n", layer.Filename)
 			continue
 		}
-		fmt.Printf("  downloading %s (%s)...\n", layer.Filename, cocoon.HumanSize(layer.Size))
+		fmt.Printf("  downloading %s (%s)...\n", layer.Filename, utils.HumanSize(layer.Size))
 		if err := downloadBlob(ctx, client, name, layer.Digest, destPath); err != nil {
 			return fmt.Errorf("download %s: %w", layer.Filename, err)
 		}
@@ -76,7 +76,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 			if _, err := os.Stat(destPath); err == nil {
 				continue
 			}
-			fmt.Printf("  downloading base image %s (%s)...\n", bi.Filename, cocoon.HumanSize(bi.Size))
+			fmt.Printf("  downloading base image %s (%s)...\n", bi.Filename, utils.HumanSize(bi.Size))
 			if err := downloadBlob(ctx, client, name, bi.Digest, destPath); err != nil {
 				return fmt.Errorf("download base %s: %w", bi.Filename, err)
 			}
@@ -92,7 +92,7 @@ func pullViaHTTP(ctx context.Context, name, tag string) error {
 	fmt.Printf("\n=== Pulled %s:%s ===\n", m.Name, m.Tag)
 	fmt.Printf("  snapshot-id: %s\n", m.SnapshotID)
 	fmt.Printf("  layers:      %d\n", len(m.Layers))
-	fmt.Printf("  total-size:  %s\n", cocoon.HumanSize(m.TotalSize))
+	fmt.Printf("  total-size:  %s\n", utils.HumanSize(m.TotalSize))
 	return nil
 }
 

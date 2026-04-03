@@ -16,6 +16,7 @@ import (
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/registryclient"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func newPushCmd() *cobra.Command {
@@ -81,7 +82,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 					Size:     size,
 				})
 				totalSize += size
-				fmt.Printf("  %s → sha256:%s (%s)\n", entry.Name(), digest[:12], cocoon.HumanSize(size))
+				fmt.Printf("  %s → sha256:%s (%s)\n", entry.Name(), digest[:12], utils.HumanSize(size))
 			}
 
 			manifestDoc := manifest.Manifest{
@@ -116,15 +117,15 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			}
 			data, err := json.MarshalIndent(manifestDoc, "", "  ")
 			if err != nil {
-				return err
+				return fmt.Errorf("marshal manifest: %w", err)
 			}
 			if err := client.PutManifestJSON(ctx, name, tag, data); err != nil {
-				return err
+				return fmt.Errorf("put manifest %s:%s: %w", name, tag, err)
 			}
 
 			fmt.Printf("\n=== Pushed %s:%s ===\n", name, tag)
 			fmt.Printf("  layers:     %d\n", len(layers))
-			fmt.Printf("  total-size: %s\n", cocoon.HumanSize(totalSize))
+			fmt.Printf("  total-size: %s\n", utils.HumanSize(totalSize))
 			return nil
 		},
 	}

@@ -176,8 +176,10 @@ func streamBlobToTar(ctx context.Context, client *registryclient.Client, name st
 	}
 	defer body.Close() //nolint:errcheck
 
-	_, err = io.Copy(tw, body)
-	return err
+	if _, err = io.Copy(tw, body); err != nil {
+		return fmt.Errorf("copy blob data: %w", err)
+	}
+	return nil
 }
 
 // snapshotExport matches cocoon's types.SnapshotExport for the snapshot.json envelope.
