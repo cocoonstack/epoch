@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -121,8 +122,8 @@ func updateSnapshotDB(paths *cocoon.Paths, m *manifest.Manifest, name string) er
 	for _, bi := range m.BaseImages {
 		id := bi.Filename
 		for _, ext := range []string{".qcow2", ".raw"} {
-			if len(id) > len(ext) && id[len(id)-len(ext):] == ext {
-				id = id[:len(id)-len(ext)]
+			if trimmed, ok := strings.CutSuffix(id, ext); ok {
+				id = trimmed
 				break
 			}
 		}

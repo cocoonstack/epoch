@@ -41,7 +41,6 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
 }

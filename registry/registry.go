@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -315,14 +316,13 @@ func manifestKey(name, tag string) string {
 
 func extractTag(key string) string {
 	// "manifests/foo/bar.json" → "bar"
-	for i := len(key) - 1; i >= 0; i-- {
-		if key[i] == '/' {
-			name := key[i+1:]
-			if len(name) > 5 && name[len(name)-5:] == ".json" {
-				return name[:len(name)-5]
-			}
-			return ""
-		}
+	idx := strings.LastIndex(key, "/")
+	if idx < 0 {
+		return ""
 	}
-	return ""
+	name, ok := strings.CutSuffix(key[idx+1:], ".json")
+	if !ok || name == "" {
+		return ""
+	}
+	return name
 }

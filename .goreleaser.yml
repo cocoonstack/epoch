@@ -10,9 +10,9 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -X github.com/cocoonstack/epoch/version.REVISION={{.Commit}}
-      - -X github.com/cocoonstack/epoch/version.VERSION={{.Env.VERSION}}
-      - -X github.com/cocoonstack/epoch/version.BUILTAT={{.Date}}
+      - -X github.com/cocoonstack/epoch/version.Revision={{.Commit}}
+      - -X github.com/cocoonstack/epoch/version.Version={{.Env.VERSION}}
+      - -X github.com/cocoonstack/epoch/version.BuiltAt={{.Date}}
     goos:
       - linux
     goarch:
@@ -25,9 +25,9 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s
-      - -X github.com/cocoonstack/epoch/version.REVISION={{.Commit}}
-      - -X github.com/cocoonstack/epoch/version.VERSION={{.Env.VERSION}}
-      - -X github.com/cocoonstack/epoch/version.BUILTAT={{.Date}}
+      - -X github.com/cocoonstack/epoch/version.Revision={{.Commit}}
+      - -X github.com/cocoonstack/epoch/version.Version={{.Env.VERSION}}
+      - -X github.com/cocoonstack/epoch/version.BuiltAt={{.Date}}
     goos:
       - linux
     goarch:

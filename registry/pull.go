@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/manifest"
@@ -83,8 +84,8 @@ func (r *Registry) Pull(ctx context.Context, paths *cocoon.Paths, name, tag stri
 	for _, bi := range m.BaseImages {
 		id := bi.Filename
 		for _, ext := range []string{".qcow2", ".raw"} {
-			if len(id) > len(ext) && id[len(id)-len(ext):] == ext {
-				id = id[:len(id)-len(ext)]
+			if trimmed, ok := strings.CutSuffix(id, ext); ok {
+				id = trimmed
 				break
 			}
 		}

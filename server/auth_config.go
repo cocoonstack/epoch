@@ -37,7 +37,7 @@ type SSOConfig struct {
 
 // LoadSSOConfig reads optional UI auth configuration from the environment.
 func LoadSSOConfig(ctx context.Context) *SSOConfig {
-	logger := log.WithFunc("LoadSSOConfig")
+	logger := log.WithFunc("server.LoadSSOConfig")
 	provider := strings.ToLower(utils.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))
 	if provider == "" {
 		return nil

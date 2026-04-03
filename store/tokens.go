@@ -62,7 +62,7 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 		return false
 	}
 	if _, err := s.db.ExecContext(ctx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-		log.WithFunc("Store.ValidateToken").Warnf(ctx, "token last_used update failed: %v", err)
+		log.WithFunc("store.ValidateToken").Warnf(ctx, "token last_used update failed: %v", err)
 	}
 	return true
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -110,8 +111,8 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 			return nil, object.Err
 		}
 		key := object.Key
-		if c.cfg.Prefix != "" && len(key) >= len(c.cfg.Prefix) {
-			key = key[len(c.cfg.Prefix):]
+		if c.cfg.Prefix != "" {
+			key, _ = strings.CutPrefix(key, c.cfg.Prefix)
 		}
 		if key != "" {
 			result = append(result, key)

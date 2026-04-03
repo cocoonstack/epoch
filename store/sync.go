@@ -25,7 +25,7 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 		return fmt.Errorf("get catalog: %w", err)
 	}
 
-	logger := log.WithFunc("Store.SyncFromCatalog")
+	logger := log.WithFunc("store.SyncFromCatalog")
 	for repoName, repo := range cat.Repositories {
 		repoID, err := s.upsertRepository(ctx, repoName)
 		if err != nil {
@@ -72,7 +72,7 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 	allLayers := make([]manifest.Layer, 0, len(m.Layers)+len(m.BaseImages))
 	allLayers = append(allLayers, m.Layers...)
 	allLayers = append(allLayers, m.BaseImages...)
-	logger := log.WithFunc("Store.syncTag")
+	logger := log.WithFunc("store.syncTag")
 	for _, layer := range allLayers {
 		if err := s.upsertBlob(ctx, Blob{
 			Digest:    layer.Digest,

@@ -13,9 +13,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath \
       -ldflags="-s -w \
-        -X github.com/cocoonstack/epoch/version.VERSION=${VERSION} \
-        -X github.com/cocoonstack/epoch/version.REVISION=${REVISION} \
-        -X github.com/cocoonstack/epoch/version.BUILTAT=${BUILTAT}" \
+        -X github.com/cocoonstack/epoch/version.Version=${VERSION} \
+        -X github.com/cocoonstack/epoch/version.Revision=${REVISION} \
+        -X github.com/cocoonstack/epoch/version.BuiltAt=${BUILTAT}" \
       -o /out/epoch .
 
 FROM alpine:3.21 AS runtime-deps

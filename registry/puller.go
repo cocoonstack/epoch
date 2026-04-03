@@ -83,7 +83,7 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 	}
 
 	// Pull from registry.
-	logger := log.WithFunc("Puller.EnsureSnapshotTag")
+	logger := log.WithFunc("registry.EnsureSnapshotTag")
 	logger.Infof(ctx, "pulling snapshot %s ...", ref)
 	start := time.Now()
 	_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
@@ -104,7 +104,7 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 // Non-blocking — runs in the background.
 func (p *Puller) PreWarm(ctx context.Context, snapshots []string) {
 	go func() {
-		logger := log.WithFunc("Puller.PreWarm")
+		logger := log.WithFunc("registry.PreWarm")
 		var wg sync.WaitGroup
 		for _, name := range snapshots {
 			wg.Add(1)

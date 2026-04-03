@@ -63,7 +63,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logger := log.WithFunc("Server.handleCallback")
+	logger := log.WithFunc("server.handleCallback")
 
 	// Exchange code for token
 	tokenResp, err := http.PostForm(s.sso.TokenURL, url.Values{

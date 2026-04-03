@@ -36,7 +36,7 @@ type Server struct {
 
 // New creates a new server.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
-	logger := log.WithFunc("Server.New")
+	logger := log.WithFunc("server.New")
 	sso := LoadSSOConfig(ctx)
 	if sso != nil {
 		logger.Infof(ctx, "UI auth enabled (provider=%s client_id=%s)", sso.Provider, sso.ClientID)
@@ -64,7 +64,7 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 
 // ListenAndServe starts the server with initial sync and background sync.
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	logger := log.WithFunc("Server.ListenAndServe")
+	logger := log.WithFunc("server.ListenAndServe")
 
 	// Initial catalog sync.
 	logger.Info(ctx, "syncing catalog to MySQL...")
@@ -131,7 +131,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// Frontend.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
+		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
 	}
 	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
@@ -182,7 +182,7 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: 200}
 		next.ServeHTTP(rw, r)
-		log.WithFunc("Server.withLogging").Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
+		log.WithFunc("server.withLogging").Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
 	})
 }
 

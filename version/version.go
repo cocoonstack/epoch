@@ -3,7 +3,7 @@ package version
 
 // Set at build time via -ldflags.
 var (
-	VERSION  = "dev"
-	REVISION = "unknown"
-	BUILTAT  = "unknown"
+	Version  = "dev"
+	Revision = "unknown"
+	BuiltAt  = "unknown"
 )

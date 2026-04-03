@@ -6,9 +6,9 @@ GOIMPORTS_LOCAL_PREFIXES := $(REPO_PATH)
 REVISION := $(shell git rev-parse HEAD || echo unknown)
 BUILTAT := $(shell date +%Y-%m-%dT%H:%M:%S)
 VERSION := $(shell git describe --tags $(shell git rev-list --tags --max-count=1) 2>/dev/null || echo dev)
-GO_LDFLAGS ?= -X $(REPO_PATH)/version.REVISION=$(REVISION) \
-              -X $(REPO_PATH)/version.BUILTAT=$(BUILTAT) \
-              -X $(REPO_PATH)/version.VERSION=$(VERSION)
+GO_LDFLAGS ?= -X $(REPO_PATH)/version.Revision=$(REVISION) \
+              -X $(REPO_PATH)/version.BuiltAt=$(BUILTAT) \
+              -X $(REPO_PATH)/version.Version=$(VERSION)
 
 ifneq ($(KEEP_SYMBOL), 1)
 GO_LDFLAGS += -s
