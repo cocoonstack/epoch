@@ -26,6 +26,7 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 	root.AddCommand(
 		newPushCmd(),
 		newPullCmd(),
+		newGetCmd(),
 		newLsCmd(),
 		newTagCmd(),
 		newRmCmd(),
