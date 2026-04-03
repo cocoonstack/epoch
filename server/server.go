@@ -62,42 +62,6 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	return s
 }
 
-func (s *Server) setupRoutes(ctx context.Context) {
-	// Registry V2 pull API.
-	s.mux.HandleFunc("GET /v2/", s.v2Check)
-	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
-	s.mux.HandleFunc("GET /v2/{name}/tags/list", s.v2TagsList)
-	s.mux.HandleFunc("GET /v2/{name}/manifests/{reference}", s.v2GetManifest)
-	s.mux.HandleFunc("HEAD /v2/{name}/manifests/{reference}", s.v2HeadManifest)
-	s.mux.HandleFunc("GET /v2/{name}/blobs/{digest}", s.v2GetBlob)
-	s.mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", s.v2HeadBlob)
-
-	// Registry V2 push API.
-	s.mux.HandleFunc("PUT /v2/{name}/blobs/{digest}", s.v2PutBlob)
-	s.mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", s.v2PutManifest)
-
-	// Control plane API.
-	s.mux.HandleFunc("GET /api/stats", s.apiStats)
-	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)
-	s.mux.HandleFunc("GET /api/repositories/{name}", s.apiGetRepository)
-	s.mux.HandleFunc("GET /api/repositories/{name}/tags", s.apiListTags)
-	s.mux.HandleFunc("GET /api/repositories/{name}/tags/{tag}", s.apiGetTag)
-	s.mux.HandleFunc("DELETE /api/repositories/{name}/tags/{tag}", s.apiDeleteTag)
-	s.mux.HandleFunc("POST /api/sync", s.apiSync)
-
-	// Token management (SSO-protected via withAuth middleware).
-	s.mux.HandleFunc("GET /api/tokens", s.apiListTokens)
-	s.mux.HandleFunc("POST /api/tokens", s.apiCreateToken)
-	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.apiDeleteToken)
-
-	// Frontend.
-	uiFS, err := fs.Sub(ui.FS, ".")
-	if err != nil {
-		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
-	}
-	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
-}
-
 // ListenAndServe starts the server with initial sync and background sync.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	logger := log.WithFunc("Server.ListenAndServe")
@@ -134,6 +98,42 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 	logger.Infof(ctx, "listening on %s", ln.Addr())
 	return serveOnListener(ctx, srv, ln)
+}
+
+func (s *Server) setupRoutes(ctx context.Context) {
+	// Registry V2 pull API.
+	s.mux.HandleFunc("GET /v2/", s.v2Check)
+	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
+	s.mux.HandleFunc("GET /v2/{name}/tags/list", s.v2TagsList)
+	s.mux.HandleFunc("GET /v2/{name}/manifests/{reference}", s.v2GetManifest)
+	s.mux.HandleFunc("HEAD /v2/{name}/manifests/{reference}", s.v2HeadManifest)
+	s.mux.HandleFunc("GET /v2/{name}/blobs/{digest}", s.v2GetBlob)
+	s.mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", s.v2HeadBlob)
+
+	// Registry V2 push API.
+	s.mux.HandleFunc("PUT /v2/{name}/blobs/{digest}", s.v2PutBlob)
+	s.mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", s.v2PutManifest)
+
+	// Control plane API.
+	s.mux.HandleFunc("GET /api/stats", s.apiStats)
+	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)
+	s.mux.HandleFunc("GET /api/repositories/{name}", s.apiGetRepository)
+	s.mux.HandleFunc("GET /api/repositories/{name}/tags", s.apiListTags)
+	s.mux.HandleFunc("GET /api/repositories/{name}/tags/{tag}", s.apiGetTag)
+	s.mux.HandleFunc("DELETE /api/repositories/{name}/tags/{tag}", s.apiDeleteTag)
+	s.mux.HandleFunc("POST /api/sync", s.apiSync)
+
+	// Token management (SSO-protected via withAuth middleware).
+	s.mux.HandleFunc("GET /api/tokens", s.apiListTokens)
+	s.mux.HandleFunc("POST /api/tokens", s.apiCreateToken)
+	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.apiDeleteToken)
+
+	// Frontend.
+	uiFS, err := fs.Sub(ui.FS, ".")
+	if err != nil {
+		log.WithFunc("Server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
+	}
+	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
 }
 
 func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {
