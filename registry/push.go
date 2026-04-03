@@ -9,6 +9,7 @@ import (
 
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // Push uploads a Cocoon snapshot to the Epoch registry.
@@ -63,7 +64,7 @@ func (r *Registry) Push(ctx context.Context, paths *cocoon.Paths, snapshotName, 
 		})
 		totalSize += size
 		if progress != nil {
-			progress(fmt.Sprintf("  %s → sha256:%s (%s)", entry.Name(), digest[:12], cocoon.HumanSize(size)))
+			progress(fmt.Sprintf("  %s → sha256:%s (%s)", entry.Name(), utils.Truncate(digest, 12), cocoon.HumanSize(size)))
 		}
 	}
 
@@ -76,11 +77,11 @@ func (r *Registry) Push(ctx context.Context, paths *cocoon.Paths, snapshotName, 
 				fp := filepath.Join(blobDir, hexID+ext)
 				if _, err := os.Stat(fp); err == nil {
 					if progress != nil {
-						progress(fmt.Sprintf("uploading base image %s%s...", hexID[:12], ext))
+						progress(fmt.Sprintf("uploading base image %s%s...", utils.Truncate(hexID, 12), ext))
 					}
 					digest, size, err := r.PushBlob(ctx, fp)
 					if err != nil {
-						return nil, fmt.Errorf("push base image %s: %w", hexID[:12], err)
+						return nil, fmt.Errorf("push base image %s: %w", utils.Truncate(hexID, 12), err)
 					}
 					baseImages = append(baseImages, manifest.Layer{
 						Digest:    digest,

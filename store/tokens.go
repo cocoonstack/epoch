@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/projecteru2/core/log"
 
@@ -37,7 +38,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	for rows.Next() {
 		var t Token
 		if err := t.scan(rows); err != nil {
-			continue
+			return nil, fmt.Errorf("scan token: %w", err)
 		}
 		tokens = append(tokens, t)
 	}

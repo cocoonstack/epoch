@@ -115,6 +115,6 @@ func (s *Store) upsertBlob(ctx context.Context, b Blob) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO blobs (digest, size, media_type, ref_count)
 		VALUES (?, ?, ?, 1)
-		ON DUPLICATE KEY UPDATE ref_count=ref_count+1`, b.Digest, b.Size, b.MediaType)
+		ON DUPLICATE KEY UPDATE size=VALUES(size), media_type=VALUES(media_type)`, b.Digest, b.Size, b.MediaType)
 	return err
 }

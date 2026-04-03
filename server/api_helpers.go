@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/cocoonstack/epoch/store"
 )
@@ -26,8 +27,8 @@ func tagResponse(t *store.Tag) (map[string]any, error) {
 }
 
 func parsePositivePathID(r *http.Request, key string) (int64, error) {
-	var id int64
-	if _, err := fmt.Sscanf(r.PathValue(key), "%d", &id); err != nil || id <= 0 {
+	id, err := strconv.ParseInt(r.PathValue(key), 10, 64)
+	if err != nil || id <= 0 {
 		return 0, fmt.Errorf("invalid id")
 	}
 	return id, nil

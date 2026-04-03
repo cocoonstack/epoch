@@ -22,6 +22,7 @@ import (
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // Registry is the Epoch snapshot registry.
@@ -96,7 +97,7 @@ func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64
 		return "", 0, fmt.Errorf("seek %s: %w", filePath, err)
 	}
 	if err := r.client.Put(ctx, blobKey(digest), f, size); err != nil {
-		return "", 0, fmt.Errorf("upload blob %s: %w", digest[:12], err)
+		return "", 0, fmt.Errorf("upload blob %s: %w", utils.Truncate(digest, 12), err)
 	}
 	return digest, size, nil
 }
@@ -122,7 +123,7 @@ func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) 
 func (r *Registry) PullBlob(ctx context.Context, digest, destPath string) error {
 	body, _, err := r.client.Get(ctx, blobKey(digest))
 	if err != nil {
-		return fmt.Errorf("get blob %s: %w", digest[:12], err)
+		return fmt.Errorf("get blob %s: %w", utils.Truncate(digest, 12), err)
 	}
 	defer func() { _ = body.Close() }()
 

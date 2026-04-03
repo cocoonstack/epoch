@@ -39,4 +39,9 @@ func TestParsePositivePathID(t *testing.T) {
 	if _, err := parsePositivePathID(req, "id"); err == nil {
 		t.Fatalf("expected invalid id error")
 	}
+
+	req.SetPathValue("id", "42abc")
+	if _, err := parsePositivePathID(req, "id"); err == nil {
+		t.Fatalf("expected invalid id error for mixed input")
+	}
 }

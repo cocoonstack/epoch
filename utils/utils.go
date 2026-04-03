@@ -45,3 +45,12 @@ func ParseRef(ref string) (string, string) {
 	}
 	return ref, "latest"
 }
+
+// Truncate returns s trimmed to at most n bytes.
+// It is intended for short ASCII identifiers used in logs and error messages.
+func Truncate(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	return s[:n]
+}

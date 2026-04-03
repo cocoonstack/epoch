@@ -71,6 +71,10 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 		v2Error(w, 400, "MANIFEST_INVALID", "invalid JSON: "+err.Error())
 		return
 	}
+	if m.Name != "" && m.Name != name {
+		v2Error(w, 400, "MANIFEST_INVALID", "manifest name does not match request path")
+		return
+	}
 
 	if err := s.reg.PushManifestJSON(r.Context(), name, ref, data); err != nil {
 		v2Error(w, 500, "MANIFEST_INVALID", err.Error())

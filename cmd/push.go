@@ -52,7 +52,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			}
 			rec := db.Snapshots[sid]
 			dataDir := paths.SnapshotDataDir(sid)
-			fmt.Printf("pushing %s:%s (id=%s) to %s ...\n", name, tag, sid[:12], client.BaseURL())
+			fmt.Printf("pushing %s:%s (id=%s) to %s ...\n", name, tag, utils.Truncate(sid, 12), client.BaseURL())
 
 			entries, err := os.ReadDir(dataDir)
 			if err != nil {
@@ -82,7 +82,7 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 					Size:     size,
 				})
 				totalSize += size
-				fmt.Printf("  %s → sha256:%s (%s)\n", entry.Name(), digest[:12], utils.HumanSize(size))
+				fmt.Printf("  %s → sha256:%s (%s)\n", entry.Name(), utils.Truncate(digest, 12), utils.HumanSize(size))
 			}
 
 			manifestDoc := manifest.Manifest{

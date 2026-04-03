@@ -45,21 +45,21 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 }
 
 func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int64, repoName, tagName string) error {
-	m, err := reg.PullManifest(ctx, repoName, tagName)
+	raw, err := reg.ManifestJSON(ctx, repoName, tagName)
 	if err != nil {
 		return err
 	}
 
-	data, err := json.Marshal(m)
-	if err != nil {
-		return err
+	var m manifest.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return fmt.Errorf("decode manifest %s:%s: %w", repoName, tagName, err)
 	}
-	digest := utils.SHA256Hex(data)
 
+	digest := utils.SHA256Hex(raw)
 	t := Tag{
 		Name:         tagName,
 		Digest:       digest,
-		ManifestJSON: string(data),
+		ManifestJSON: string(raw),
 		TotalSize:    m.TotalSize,
 		LayerCount:   len(m.Layers) + len(m.BaseImages),
 		PushedAt:     m.PushedAt,
@@ -79,7 +79,7 @@ func (s *Store) syncTag(ctx context.Context, reg *registry.Registry, repoID int6
 			Size:      layer.Size,
 			MediaType: layer.MediaType,
 		}); err != nil {
-			logger.Warnf(ctx, "upsert blob %s: %v", layer.Digest[:12], err)
+			logger.Warnf(ctx, "upsert blob %s: %v", utils.Truncate(layer.Digest, 12), err)
 		}
 	}
 	return nil
