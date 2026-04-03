@@ -40,11 +40,16 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 			client := newRegistryClient()
 			paths := cocoon.NewPaths(flagRootDir)
 
-			// Find snapshot data directory.
+			// Find snapshot data directory and read metadata.
 			sid, err := paths.ResolveSnapshotID(name)
 			if err != nil {
 				return fmt.Errorf("resolve snapshot %s: %w", name, err)
 			}
+			db, err := paths.ReadSnapshotDB()
+			if err != nil {
+				return fmt.Errorf("read snapshot db: %w", err)
+			}
+			rec := db.Snapshots[sid]
 			dataDir := paths.SnapshotDataDir(sid)
 			fmt.Printf("pushing %s:%s (id=%s) to %s ...\n", name, tag, sid[:12], client.BaseURL())
 
@@ -87,6 +92,19 @@ EPOCH_REGISTRY_TOKEN environment variables.`,
 				Layers:        make([]manifest.Layer, 0, len(layers)),
 				TotalSize:     totalSize,
 				CreatedAt:     time.Now().UTC(),
+			}
+			if rec != nil {
+				manifestDoc.Image = rec.Image
+				manifestDoc.CPU = rec.CPU
+				manifestDoc.Memory = rec.Memory
+				manifestDoc.Storage = rec.Storage
+				manifestDoc.NICs = rec.NICs
+				if len(rec.ImageBlobIDs) > 0 {
+					manifestDoc.ImageBlobIDs = make(map[string]string, len(rec.ImageBlobIDs))
+					for k := range rec.ImageBlobIDs {
+						manifestDoc.ImageBlobIDs[k] = k
+					}
+				}
 			}
 			for _, layer := range layers {
 				manifestDoc.Layers = append(manifestDoc.Layers, manifest.Layer{
