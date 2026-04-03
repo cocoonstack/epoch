@@ -6,6 +6,7 @@ Snapshot registry for [Cocoon](https://github.com/cocoonstack/cocoon) MicroVMs. 
 
 - **Content-addressed storage** -- blobs are de-duplicated by SHA-256 digest
 - **OCI Distribution API** -- `/v2/` push and pull, compatible with standard registry tooling
+- **Streaming export** -- `epoch get` streams snapshots or cloud images to stdout for direct piping into `cocoon snapshot import` or `cocoon image import`
 - **MySQL metadata index** -- queryable catalog for the web UI and control API
 - **SSO login** -- optional Google OAuth or generic OIDC for the web UI
 - **Token management** -- create and revoke bearer tokens from the dashboard
@@ -91,23 +92,22 @@ make build          # produces ./epoch
 
 - Disabled by default (open access)
 - Set `SSO_PROVIDER=google` or `SSO_PROVIDER=oidc` to enable session-based login
-- See [deploy/epoch-server.yaml](deploy/epoch-server.yaml) for the full list of SSO variables
+- See [epoch-server.yaml](epoch-server.yaml) for the full list of SSO variables
 
 ### Deployment files
 
 | Path | Purpose |
 |---|---|
-| `deploy/docker-compose.yaml` | Local MySQL and MinIO |
-| `deploy/epoch-server.yaml` | Kubernetes Deployment template |
-| `deploy/Dockerfile` | Container image build |
-| `deploy/epoch-server.service` | systemd unit file |
+| `docker-compose.yaml` | Local MySQL and MinIO |
+| `epoch-server.yaml` | Kubernetes Deployment template |
+| `Dockerfile` | Container image build |
+| `epoch-server.service` | systemd unit file |
 
 ## Quick Start
 
 Start local dependencies:
 
 ```bash
-cd deploy
 export MYSQL_ROOT_PASSWORD=changeme
 export MYSQL_PASSWORD=changeme
 export MINIO_ROOT_USER=minioadmin
@@ -129,13 +129,38 @@ export EPOCH_S3_SECURE=false
 ./epoch serve --addr :4300 --dsn 'epoch:epoch@tcp(127.0.0.1:3306)/epoch?parseTime=true'
 ```
 
-Push and inspect a snapshot:
+## CLI
 
 ```bash
-./epoch push ubuntu-dev --tag latest
-./epoch ls
-./epoch inspect ubuntu-dev:latest
+epoch serve           # start HTTP server
+epoch push NAME:TAG   # push a local cocoon snapshot to the registry
+epoch pull NAME:TAG   # pull a snapshot and write to cocoon's local storage
+epoch get  NAME:TAG   # stream a snapshot or cloud image to stdout (see below)
+epoch ls [NAME]       # list repositories or tags
+epoch inspect NAME:TAG # show manifest details (JSON)
+epoch tag SRC DST     # create a new tag from an existing manifest
+epoch rm  NAME:TAG    # remove a tag
 ```
+
+### Streaming with `epoch get`
+
+`epoch get` auto-detects the artifact type and streams the appropriate format to stdout:
+
+- **Snapshots** → gzip-compressed tar archive (compatible with `cocoon snapshot import`)
+- **Cloud images** → gzip-compressed qcow2 data (compatible with `cocoon image import`)
+
+```bash
+# Pull a snapshot directly into cocoon
+epoch get myvm:v1 | cocoon snapshot import --name myvm
+
+# Pull a cloud image directly into cocoon
+epoch get ubuntu-base:latest | cocoon image import ubuntu-base
+
+# Transfer across hosts
+ssh registry-host epoch get myvm:v1 | cocoon snapshot import --name myvm
+```
+
+Progress output goes to stderr so it does not interfere with the data stream.
 
 ## Development
 
