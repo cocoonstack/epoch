@@ -3,7 +3,6 @@ package cmd
 import (
 	"archive/tar"
 	"bufio"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,11 +23,11 @@ func newGetCmd() *cobra.Command {
 		Short: "Stream a snapshot or cloud image to stdout",
 		Long: `Stream an artifact from the Epoch registry to stdout.
 
-For snapshots: outputs a gzip-compressed tar archive compatible with
-  cocoon snapshot import
+For snapshots: outputs a raw tar archive compatible with
+  cocoon snapshot import (auto-detects gzip/raw)
 
-For cloud images: outputs gzip-compressed qcow2 data compatible with
-  cocoon image import
+For cloud images: outputs raw qcow2 data compatible with
+  cocoon image import (auto-detects format)
 
 Progress information is written to stderr.
 
@@ -62,8 +61,8 @@ func streamArtifact(ctx context.Context, name, tag string, w io.Writer) error {
 	return streamSnapshot(ctx, client, name, m, w)
 }
 
-// streamSnapshot writes a gzip-compressed tar archive to w,
-// compatible with cocoon snapshot import.
+// streamSnapshot writes a raw tar archive to w,
+// compatible with cocoon snapshot import (auto-detects gzip/raw).
 func streamSnapshot(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
 	blobIDs := make(map[string]struct{}, len(m.ImageBlobIDs))
 	for k := range m.ImageBlobIDs {
@@ -91,8 +90,7 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 
 	now := time.Now()
 	bw := bufio.NewWriterSize(w, 256<<10)
-	gw, _ := gzip.NewWriterLevel(bw, gzip.BestSpeed)
-	tw := tar.NewWriter(gw)
+	tw := tar.NewWriter(bw)
 
 	if err := tw.WriteHeader(&tar.Header{
 		Name:    "snapshot.json",
@@ -117,9 +115,6 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("close tar: %w", err)
 	}
-	if err := gw.Close(); err != nil {
-		return fmt.Errorf("close gzip: %w", err)
-	}
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("flush output: %w", err)
 	}
@@ -128,11 +123,10 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 	return nil
 }
 
-// streamCloudImage writes gzip-compressed qcow2 data to w,
-// compatible with cocoon image import (auto-detects gzip + qcow2 magic).
+// streamCloudImage writes raw qcow2 data to w,
+// compatible with cocoon image import (auto-detects format).
 func streamCloudImage(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
 	bw := bufio.NewWriterSize(w, 256<<10)
-	gw, _ := gzip.NewWriterLevel(bw, gzip.BestSpeed)
 
 	for _, layer := range m.Layers {
 		fmt.Fprintf(os.Stderr, "  streaming %s (%s)...\n", layer.Filename, utils.HumanSize(layer.Size))
@@ -141,16 +135,13 @@ func streamCloudImage(ctx context.Context, client *registryclient.Client, name s
 		if err != nil {
 			return fmt.Errorf("get blob %s: %w", layer.Filename, err)
 		}
-		if _, copyErr := io.Copy(gw, body); copyErr != nil {
+		if _, copyErr := io.Copy(bw, body); copyErr != nil {
 			body.Close() //nolint:errcheck,gosec
 			return fmt.Errorf("stream %s: %w", layer.Filename, copyErr)
 		}
 		body.Close() //nolint:errcheck,gosec
 	}
 
-	if err := gw.Close(); err != nil {
-		return fmt.Errorf("close gzip: %w", err)
-	}
 	if err := bw.Flush(); err != nil {
 		return fmt.Errorf("flush output: %w", err)
 	}

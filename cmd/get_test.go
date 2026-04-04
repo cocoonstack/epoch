@@ -3,7 +3,6 @@ package cmd
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -141,14 +140,7 @@ func TestStreamSnapshot(t *testing.T) {
 		t.Fatalf("streamSnapshot: %v", err)
 	}
 
-	output := buf.Bytes()
-	gr, err := gzip.NewReader(bytes.NewReader(output))
-	if err != nil {
-		t.Fatalf("gzip reader: %v", err)
-	}
-	defer gr.Close()
-
-	tr := tar.NewReader(gr)
+	tr := tar.NewReader(bytes.NewReader(buf.Bytes()))
 	files := make(map[string][]byte)
 	for {
 		hdr, err := tr.Next()
@@ -225,16 +217,7 @@ func TestStreamCloudImage(t *testing.T) {
 		t.Fatalf("streamCloudImage: %v", err)
 	}
 
-	output := buf.Bytes()
-	gr, err := gzip.NewReader(bytes.NewReader(output))
-	if err != nil {
-		t.Fatalf("gzip reader: %v", err)
-	}
-	got, err := io.ReadAll(gr)
-	if err != nil {
-		t.Fatalf("read gunzipped: %v", err)
-	}
-	gr.Close()
+	got := buf.Bytes()
 
 	// Verify content is concat of parts.
 	want := append(qcow2Part1, qcow2Part2...)
