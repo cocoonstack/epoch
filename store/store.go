@@ -16,8 +16,10 @@ import (
 
 // Store wraps a MySQL connection for Epoch metadata.
 type Store struct {
-	db *sql.DB
-	mu sync.Mutex // guards SyncFromCatalog
+	db              *sql.DB
+	mu              sync.Mutex // guards SyncFromCatalog
+	tokenCache      sync.Map   // hash → tokenCacheEntry
+	lastCatalogHash string     // digest of last synced catalog.json
 }
 
 // New opens a MySQL connection and runs migrations.
@@ -38,6 +40,7 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	if err := s.migrate(ctx); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	s.startTokenCacheCleanup(ctx)
 	return s, nil
 }
 

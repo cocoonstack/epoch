@@ -6,11 +6,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestValidateTokenIgnoresZeroRowsAffectedOnLastUsedUpdate(t *testing.T) {
+func TestValidateTokenCachesAndUpdatesAsync(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -30,7 +31,12 @@ func TestValidateTokenIgnoresZeroRowsAffectedOnLastUsedUpdate(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	if !s.ValidateToken(context.Background(), token) {
-		t.Fatalf("ValidateToken returned false for an existing token when UPDATE affected 0 rows")
+		t.Fatalf("ValidateToken returned false for an existing token")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if !s.ValidateToken(context.Background(), token) {
+		t.Fatalf("ValidateToken cache miss on second call")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet: %v", err)

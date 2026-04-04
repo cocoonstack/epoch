@@ -37,7 +37,7 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	ref := r.PathValue("reference")
 
-	data, err := s.reg.ManifestJSON(r.Context(), name, ref)
+	digest, size, err := s.reg.ManifestHead(r.Context(), name, ref)
 	if err != nil {
 		if isNotFound(err) {
 			w.WriteHeader(404)
@@ -47,10 +47,11 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := utils.SHA256Hex(data)
 	w.Header().Set("Content-Type", manifestMediaType)
-	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	if digest != "" {
+		w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
 	w.WriteHeader(200)
 }
 

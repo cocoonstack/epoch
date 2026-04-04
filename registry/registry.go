@@ -28,8 +28,16 @@ import (
 
 // Registry is the Epoch snapshot registry.
 type Registry struct {
-	client    *objectstore.Client
-	catalogMu sync.Mutex // guards read-modify-write of catalog.json
+	client        *objectstore.Client
+	catalogMu     sync.Mutex // guards read-modify-write of catalog.json
+	manifestMeta  sync.Map   // manifestKey → manifestMetaEntry
+	catalogCache  []byte     // cached catalog.json bytes
+	catalogExpiry time.Time  // expiry of catalogCache
+}
+
+type manifestMetaEntry struct {
+	Digest string
+	Size   int64
 }
 
 // New creates a registry backed by the given object store client.
@@ -166,6 +174,20 @@ func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, 
 	return io.ReadAll(body)
 }
 
+// ManifestHead returns the digest and size of a manifest without downloading the body.
+func (r *Registry) ManifestHead(ctx context.Context, name, tag string) (string, int64, error) {
+	key := manifestKey(name, tag)
+	if entry, ok := r.manifestMeta.Load(key); ok {
+		meta := entry.(manifestMetaEntry)
+		return meta.Digest, meta.Size, nil
+	}
+	size, err := r.client.Head(ctx, key)
+	if err != nil {
+		return "", 0, fmt.Errorf("head manifest %s:%s: %w", name, tag, err)
+	}
+	return "", size, nil
+}
+
 // --- Manifest operations ---
 
 // PushManifest uploads a manifest for name:tag.
@@ -179,8 +201,12 @@ func (r *Registry) PushManifest(ctx context.Context, m *manifest.Manifest) error
 	if err := r.client.Put(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
 		return fmt.Errorf("upload manifest %s:%s: %w", m.Name, m.Tag, err)
 	}
+	h := sha256.Sum256(data)
+	r.manifestMeta.Store(key, manifestMetaEntry{
+		Digest: hex.EncodeToString(h[:]),
+		Size:   int64(len(data)),
+	})
 
-	// Update catalog.
 	return r.updateCatalog(ctx, m.Name, m.Tag)
 }
 
@@ -190,6 +216,11 @@ func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data 
 	if err := r.client.Put(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
 		return fmt.Errorf("upload manifest %s:%s: %w", name, tag, err)
 	}
+	h := sha256.Sum256(data)
+	r.manifestMeta.Store(key, manifestMetaEntry{
+		Digest: hex.EncodeToString(h[:]),
+		Size:   int64(len(data)),
+	})
 	return r.updateCatalog(ctx, name, tag)
 }
 
@@ -237,23 +268,67 @@ func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) 
 
 // GetCatalog returns the global catalog.
 func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
+	cat, _, err := r.GetCatalogWithDigest(ctx)
+	return cat, err
+}
+
+const catalogCacheTTL = 10 * time.Second
+
+// GetCatalogWithDigest returns the catalog together with the SHA-256 digest of its raw JSON.
+func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog, string, error) {
+	raw, err := r.getCatalogRaw(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if raw == nil {
+		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, "", nil
+	}
+
+	var cat manifest.Catalog
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return nil, "", err
+	}
+	if cat.Repositories == nil {
+		cat.Repositories = make(map[string]*manifest.Repository)
+	}
+
+	h := sha256.Sum256(raw)
+	return &cat, hex.EncodeToString(h[:]), nil
+}
+
+func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
+	r.catalogMu.Lock()
+	if r.catalogCache != nil && time.Now().Before(r.catalogExpiry) {
+		cached := r.catalogCache
+		r.catalogMu.Unlock()
+		return cached, nil
+	}
+	r.catalogMu.Unlock()
+
 	body, _, err := r.client.Get(ctx, "catalog.json")
 	if errors.Is(err, objectstore.ErrNotFound) {
-		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = body.Close() }()
 
-	var cat manifest.Catalog
-	if err := json.NewDecoder(body).Decode(&cat); err != nil {
+	raw, err := io.ReadAll(body)
+	if err != nil {
 		return nil, err
 	}
-	if cat.Repositories == nil {
-		cat.Repositories = make(map[string]*manifest.Repository)
-	}
-	return &cat, nil
+
+	r.catalogMu.Lock()
+	r.catalogCache = raw
+	r.catalogExpiry = time.Now().Add(catalogCacheTTL)
+	r.catalogMu.Unlock()
+	return raw, nil
+}
+
+func (r *Registry) invalidateCatalogCache() {
+	r.catalogCache = nil
+	r.catalogExpiry = time.Time{}
 }
 
 func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
@@ -301,7 +376,11 @@ func (r *Registry) putCatalog(ctx context.Context, cat *manifest.Catalog) error 
 	if err != nil {
 		return err
 	}
-	return r.client.Put(ctx, "catalog.json", bytes.NewReader(data), int64(len(data)))
+	if err := r.client.Put(ctx, "catalog.json", bytes.NewReader(data), int64(len(data))); err != nil {
+		return err
+	}
+	r.invalidateCatalogCache()
+	return nil
 }
 
 // --- Key helpers ---

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/projecteru2/core/log"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/cocoonstack/epoch/cocoon"
 	"github.com/cocoonstack/epoch/objectstore"
@@ -20,6 +21,7 @@ type Puller struct {
 
 	mu     sync.Mutex
 	pulled map[string]bool // name:tag → pulled
+	sf     singleflight.Group
 }
 
 // NewPuller creates a Puller for use by vk-cocoon.
@@ -74,30 +76,31 @@ func (p *Puller) EnsureSnapshotTag(ctx context.Context, name, tag string) error 
 	}
 	p.mu.Unlock()
 
-	// Check if already exists locally.
-	if cocoon.SnapshotExists(p.paths, name) {
+	_, err, _ := p.sf.Do(ref, func() (any, error) {
+		if cocoon.SnapshotExists(p.paths, name) {
+			p.mu.Lock()
+			p.pulled[ref] = true
+			p.mu.Unlock()
+			return nil, nil
+		}
+
+		logger := log.WithFunc("registry.EnsureSnapshotTag")
+		logger.Infof(ctx, "pulling snapshot %s ...", ref)
+		start := time.Now()
+		_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
+			logger.Info(ctx, msg)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("epoch pull %s: %w", ref, err)
+		}
+		logger.Infof(ctx, "snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
+
 		p.mu.Lock()
 		p.pulled[ref] = true
 		p.mu.Unlock()
-		return nil
-	}
-
-	// Pull from registry.
-	logger := log.WithFunc("registry.EnsureSnapshotTag")
-	logger.Infof(ctx, "pulling snapshot %s ...", ref)
-	start := time.Now()
-	_, err := p.reg.Pull(ctx, p.paths, name, tag, func(msg string) {
-		logger.Info(ctx, msg)
+		return nil, nil
 	})
-	if err != nil {
-		return fmt.Errorf("epoch pull %s: %w", ref, err)
-	}
-	logger.Infof(ctx, "snapshot %s pulled in %s", ref, time.Since(start).Round(time.Second))
-
-	p.mu.Lock()
-	p.pulled[ref] = true
-	p.mu.Unlock()
-	return nil
+	return err
 }
 
 // PreWarm pulls multiple snapshots concurrently at startup.

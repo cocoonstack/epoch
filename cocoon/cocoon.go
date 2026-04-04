@@ -74,7 +74,7 @@ func (p *Paths) ReadSnapshotDB() (*SnapshotDB, error) {
 	}
 	var db SnapshotDB
 	if err := json.Unmarshal(data, &db); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal snapshot db: %w", err)
 	}
 	if db.Snapshots == nil {
 		db.Snapshots = make(map[string]*SnapshotRecord)
@@ -89,7 +89,7 @@ func (p *Paths) ReadSnapshotDB() (*SnapshotDB, error) {
 func (p *Paths) WriteSnapshotDB(db *SnapshotDB) error {
 	data, err := json.MarshalIndent(db, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal snapshot db: %w", err)
 	}
 	dir := filepath.Dir(p.SnapshotDBFile())
 	if err := os.MkdirAll(dir, 0o750); err != nil {

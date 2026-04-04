@@ -50,7 +50,7 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 	}
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
-		return nil, fmt.Errorf("EPOCH_S3_ENDPOINT, EPOCH_S3_ACCESS_KEY, and EPOCH_S3_BUCKET are required")
+		return nil, fmt.Errorf("epoch s3 endpoint, access key, and bucket are required")
 	}
 
 	normalizedEndpoint, secure, err := normalizeEndpoint(endpoint, secureRaw)
@@ -95,7 +95,7 @@ func ConfigFromConfigMap(namespace, name, prefix string) (*Config, error) {
 	prefixValue := utils.FirstNonEmpty(cm.Data["EPOCH_S3_PREFIX"], prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
-		return nil, fmt.Errorf("configmap %s/%s missing EPOCH_S3_ENDPOINT, EPOCH_S3_ACCESS_KEY, or EPOCH_S3_BUCKET", namespace, name)
+		return nil, fmt.Errorf("configmap %s/%s missing s3 endpoint, access key, or bucket", namespace, name)
 	}
 
 	normalizedEndpoint, secure, err := normalizeEndpoint(endpoint, secureRaw)
@@ -121,21 +121,21 @@ func (c *Config) fullKey(key string) string {
 func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", false, fmt.Errorf("empty S3 endpoint")
+		return "", false, fmt.Errorf("empty s3 endpoint")
 	}
 	if strings.Contains(raw, "://") { //nolint:nestif // parsing logic requires conditional branching
 		u, err := url.Parse(raw)
 		if err != nil {
-			return "", false, fmt.Errorf("parse EPOCH_S3_ENDPOINT: %w", err)
+			return "", false, fmt.Errorf("parse s3 endpoint: %w", err)
 		}
 		if u.Host == "" {
-			return "", false, fmt.Errorf("EPOCH_S3_ENDPOINT must include a host")
+			return "", false, fmt.Errorf("s3 endpoint must include a host")
 		}
 		secure := u.Scheme == "https"
 		if secureRaw != "" {
 			parsed, parseErr := strconv.ParseBool(secureRaw)
 			if parseErr != nil {
-				return "", false, fmt.Errorf("parse EPOCH_S3_SECURE: %w", parseErr)
+				return "", false, fmt.Errorf("parse s3 secure: %w", parseErr)
 			}
 			secure = parsed
 		}
@@ -146,7 +146,7 @@ func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 	if secureRaw != "" {
 		parsed, err := strconv.ParseBool(secureRaw)
 		if err != nil {
-			return "", false, fmt.Errorf("parse EPOCH_S3_SECURE: %w", err)
+			return "", false, fmt.Errorf("parse s3 secure: %w", err)
 		}
 		secure = parsed
 	}

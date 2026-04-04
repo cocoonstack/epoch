@@ -8,6 +8,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.99
 	github.com/projecteru2/core v0.0.0-20241016125006-ff909eefe04c
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sync v0.20.0
 )
 
 require (

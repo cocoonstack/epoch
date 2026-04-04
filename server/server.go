@@ -199,6 +199,8 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+var _ http.ResponseWriter = (*responseWriter)(nil)
+
 type responseWriter struct {
 	http.ResponseWriter
 	status int
