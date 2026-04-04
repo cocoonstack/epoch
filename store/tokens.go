@@ -27,8 +27,8 @@ func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string
 	}
 	plaintext := hex.EncodeToString(raw)
 	hash := utils.SHA256Hex([]byte(plaintext))
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (name, token_hash, token_plain, created_by) VALUES (?, ?, ?, ?)`,
-		name, hash, plaintext, createdBy)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (name, token_hash, created_by) VALUES (?, ?, ?)`,
+		name, hash, createdBy)
 	if err != nil {
 		return "", err
 	}
@@ -36,7 +36,7 @@ func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string
 }
 
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, token_plain, created_by, created_at, last_used FROM tokens ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

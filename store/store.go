@@ -84,7 +84,6 @@ func (s *Store) migrate(ctx context.Context) error {
 			id          BIGINT AUTO_INCREMENT PRIMARY KEY,
 			name        VARCHAR(255) NOT NULL,
 			token_hash  CHAR(64) NOT NULL UNIQUE,
-			token_plain VARCHAR(255) NOT NULL DEFAULT '',
 			created_by  VARCHAR(255) NOT NULL DEFAULT '',
 			created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			last_used   TIMESTAMP NULL,
@@ -96,7 +95,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("exec DDL: %w", err)
 		}
 	}
-	// Migration: add token_plain column (ignore error if already exists).
-	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens ADD COLUMN token_plain VARCHAR(255) NOT NULL DEFAULT '' AFTER token_hash`)
+	// Migration: drop token_plain column (ignore error if already dropped).
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens DROP COLUMN token_plain`)
 	return nil
 }

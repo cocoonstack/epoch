@@ -75,7 +75,7 @@ func NewFromConfigMap(namespace, configmap string) (*Registry, error) {
 
 // PushBlob uploads a file as a content-addressable blob.
 // Returns the SHA-256 hex digest and size.
-// Computes the hash in a single pass using io.TeeReader to avoid reading the file twice.
+// Computes the hash in a first pass, then seeks back to upload the content.
 func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64, error) {
 	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
 	if err != nil {

@@ -43,10 +43,11 @@ type DashboardStats struct {
 }
 
 // Token is a registry access token.
+// The Token field is only populated on create (returned to caller); it is never read back from the DB.
 type Token struct {
 	ID        int64      `json:"id"`
 	Name      string     `json:"name"`
-	Token     string     `json:"token"`
+	Token     string     `json:"token,omitempty"`
 	CreatedBy string     `json:"createdBy"`
 	CreatedAt time.Time  `json:"createdAt"`
 	LastUsed  *time.Time `json:"lastUsed,omitempty"`
@@ -65,5 +66,5 @@ func (t *Tag) scanDetails(row rowScanner) error {
 }
 
 func (t *Token) scan(row rowScanner) error {
-	return row.Scan(&t.ID, &t.Name, &t.Token, &t.CreatedBy, &t.CreatedAt, &t.LastUsed)
+	return row.Scan(&t.ID, &t.Name, &t.CreatedBy, &t.CreatedAt, &t.LastUsed)
 }
