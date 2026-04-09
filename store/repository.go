@@ -37,25 +37,33 @@ func (s *Store) GetRepository(ctx context.Context, name string) (*Repository, er
 
 func (s *Store) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 	return queryRows(ctx, s.db, `
-		SELECT t.id, t.repository_id, t.name, t.digest, t.total_size, t.layer_count, t.pushed_at, t.synced_at
+		SELECT t.id, t.repository_id, t.name, t.digest, t.artifact_type, t.total_size, t.layer_count, t.pushed_at, t.synced_at
 		FROM tags t
 		JOIN repositories r ON r.id = t.repository_id
 		WHERE r.name = ?
 		ORDER BY t.pushed_at DESC`, func(rows *sql.Rows, tag *Tag) error {
 		tag.RepoName = repoName
-		return tag.scanSummary(rows)
+		if err := tag.scanSummary(rows); err != nil {
+			return err
+		}
+		tag.Kind = artifactKindString(tag.ArtifactType)
+		return nil
 	}, repoName)
 }
 
 func (s *Store) GetTag(ctx context.Context, repoName, tagName string) (*Tag, error) {
 	return queryOptional(func(tag *Tag) error {
 		tag.RepoName = repoName
-		return tag.scanDetails(s.db.QueryRowContext(ctx, `
-		SELECT t.id, t.repository_id, t.name, t.digest, t.manifest_json,
+		if err := tag.scanDetails(s.db.QueryRowContext(ctx, `
+		SELECT t.id, t.repository_id, t.name, t.digest, t.artifact_type, t.manifest_json,
 			t.total_size, t.layer_count, t.pushed_at, t.synced_at
 		FROM tags t
 		JOIN repositories r ON r.id = t.repository_id
-		WHERE r.name = ? AND t.name = ?`, repoName, tagName))
+		WHERE r.name = ? AND t.name = ?`, repoName, tagName)); err != nil {
+			return err
+		}
+		tag.Kind = artifactKindString(tag.ArtifactType)
+		return nil
 	})
 }
 

@@ -9,10 +9,10 @@ import (
 func (s *Server) apiListTokens(w http.ResponseWriter, r *http.Request) {
 	tokens, err := s.store.ListTokens(r.Context())
 	if err != nil {
-		writeError(w, 500, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, 200, tokens)
+	writeJSON(w, http.StatusOK, tokens)
 }
 
 // POST /api/tokens — body: {"name":"my-token"}
@@ -21,7 +21,7 @@ func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		writeError(w, 400, "name is required")
+		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	createdBy := ""
@@ -32,22 +32,22 @@ func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	plaintext, err := s.store.CreateToken(r.Context(), req.Name, createdBy)
 	if err != nil {
-		writeError(w, 500, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, 201, map[string]string{"token": plaintext, "name": req.Name})
+	writeJSON(w, http.StatusCreated, map[string]string{"token": plaintext, "name": req.Name})
 }
 
 // DELETE /api/tokens/{id}
 func (s *Server) apiDeleteToken(w http.ResponseWriter, r *http.Request) {
 	id, err := parsePositivePathID(r, "id")
 	if err != nil {
-		writeError(w, 400, "invalid id")
+		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	if err := s.store.DeleteToken(r.Context(), id); err != nil {
-		writeError(w, 500, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]string{"status": "deleted"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

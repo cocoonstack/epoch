@@ -7,21 +7,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagRootDir string
-
 // NewRootCmd creates the root cobra command for epoch.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "epoch",
-		Short: "Epoch — Cocoon VM snapshot registry backed by S3-compatible object storage",
-		Long: `Epoch is a Harbor-like registry for Cocoon MicroVM snapshots.
+		Short: "Epoch — generic OCI registry for cocoonstack artifacts (snapshots, cloud images, container images)",
+		Long: `Epoch is an OCI Distribution-compatible registry that stores three kinds of
+cocoonstack artifacts side by side:
+
+  - Container images       — pushed/pulled by oras, crane, docker
+  - OCI cloud images       — disk-only artifacts, e.g. ghcr.io/cocoonstack/windows/win11:25h2
+  - OCI VM snapshots       — cocoon snapshots packaged as OCI artifacts
 
 CLI commands talk to the Epoch HTTP server (default http://127.0.0.1:4300).
 Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 		SilenceUsage: true,
 	}
-
-	root.PersistentFlags().StringVar(&flagRootDir, "root-dir", "/var/lib/cocoon", "Cocoon root directory (used by push to read local snapshot data)")
 
 	root.AddCommand(
 		newPushCmd(),

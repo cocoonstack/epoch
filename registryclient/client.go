@@ -1,3 +1,6 @@
+// Package registryclient is a small HTTP client for talking to an Epoch
+// (or any OCI Distribution-compatible) registry. It implements just enough
+// of the spec for epoch's CLI tools to push and pull blobs and manifests.
 package registryclient
 
 import (
@@ -10,24 +13,26 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/cocoonstack/epoch/manifest"
 )
 
 const (
-	defaultBaseURL      = "http://127.0.0.1:4300"
-	manifestContentType = "application/vnd.epoch.manifest.v1+json"
-	maxErrorBodyBytes   = 512
+	defaultBaseURL    = "http://127.0.0.1:4300"
+	maxErrorBodyBytes = 512
 )
 
-// Client wraps the Epoch HTTP API and registry endpoints.
+// Client wraps the OCI Distribution endpoints epoch CLIs use.
+//
+// All methods take a repository `name` so multi-segment names like
+// `library/nginx` work; the client never tries to interpret it.
 type Client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
 }
 
-// New creates a client for the given base URL and bearer token.
+// New creates a client for the given base URL and bearer token. Empty baseURL
+// falls back to http://127.0.0.1:4300. The TLS config skips verification
+// because epoch is commonly deployed behind a self-signed cert in dev.
 func New(baseURL, token string) *Client {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
@@ -53,60 +58,57 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// GetJSON performs a GET on /api/... and decodes JSON into out.
-func (c *Client) GetJSON(ctx context.Context, path string, out any) error {
-	rawURL := c.apiURL(path)
-	resp, err := c.do(ctx, http.MethodGet, rawURL, nil, "", -1)
+// --- Manifests ---
+
+// manifestAcceptHeader lists every manifest media type the client knows how
+// to handle. Sent on every GET /v2/.../manifests/... request — Docker Hub /
+// GHCR will return 415 or a different schema if it is missing.
+const manifestAcceptHeader = "application/vnd.oci.image.manifest.v1+json, " +
+	"application/vnd.oci.image.index.v1+json, " +
+	"application/vnd.docker.distribution.manifest.v2+json, " +
+	"application/vnd.docker.distribution.manifest.list.v2+json"
+
+// GetManifest downloads a manifest's raw bytes for `name:tag` and returns
+// them along with the server-supplied Content-Type. Callers that need to
+// classify the manifest pass the bytes to manifest.Classify.
+func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, string, error) {
+	rawURL := c.v2URL(name, "manifests", tag)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return nil, "", err
+	}
+	req.Header.Set("Accept", manifestAcceptHeader)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.httpClient.Do(req) //nolint:gosec // baseURL is configured by trusted caller
+	if err != nil {
+		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return c.statusError(http.MethodGet, rawURL, resp)
+		return nil, "", c.statusError(http.MethodGet, rawURL, resp)
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
-}
-
-// Delete performs a DELETE on /api/... and expects a 2xx response.
-func (c *Client) Delete(ctx context.Context, path string) error {
-	rawURL := c.apiURL(path)
-	resp, err := c.do(ctx, http.MethodDelete, rawURL, nil, "", -1)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.statusError(http.MethodDelete, rawURL, resp)
-	}
-	return nil
+	return data, resp.Header.Get("Content-Type"), nil
 }
 
-// GetManifestJSON downloads the raw manifest JSON for name:tag.
-func (c *Client) GetManifestJSON(ctx context.Context, name, tag string) ([]byte, error) {
-	return c.getBytes(ctx, http.MethodGet, c.v2URL(name, "manifests", tag), http.StatusOK)
+// PutManifest uploads a manifest with the given content type. The OCI spec
+// requires the Content-Type header to match the manifest's `mediaType` field;
+// callers MUST pass the right value (typically MediaTypeOCIManifest).
+func (c *Client) PutManifest(ctx context.Context, name, tag string, data []byte, contentType string) error {
+	return c.putBytes(ctx, c.v2URL(name, "manifests", tag), contentType, bytes.NewReader(data), int64(len(data)), http.StatusCreated)
 }
 
-// GetManifest downloads and decodes a manifest for name:tag.
-func (c *Client) GetManifest(ctx context.Context, name, tag string) (*manifest.Manifest, error) {
-	data, err := c.GetManifestJSON(ctx, name, tag)
-	if err != nil {
-		return nil, err
-	}
-	var m manifest.Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("decode manifest %s:%s: %w", name, tag, err)
-	}
-	return &m, nil
-}
+// --- Blobs ---
 
-// PutManifestJSON uploads raw manifest JSON for name:tag.
-func (c *Client) PutManifestJSON(ctx context.Context, name, tag string, data []byte) error {
-	return c.putBytes(ctx, c.v2URL(name, "manifests", tag), manifestContentType, bytes.NewReader(data), int64(len(data)), http.StatusCreated)
-}
-
-// BlobExists checks whether a blob exists in a repository.
+// BlobExists returns true if the blob is present in the repository's blob
+// store. The digest must include the `sha256:` prefix.
 func (c *Client) BlobExists(ctx context.Context, name, digest string) (bool, error) {
-	rawURL := c.v2URL(name, "blobs", "sha256:"+digest)
+	rawURL := c.v2URL(name, "blobs", digest)
 	resp, err := c.do(ctx, http.MethodHead, rawURL, nil, "", -1)
 	if err != nil {
 		return false, err
@@ -123,8 +125,9 @@ func (c *Client) BlobExists(ctx context.Context, name, digest string) (bool, err
 }
 
 // GetBlob downloads a blob and returns the body for the caller to consume.
+// The digest must include the `sha256:` prefix. Caller must close the body.
 func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadCloser, error) {
-	rawURL := c.v2URL(name, "blobs", "sha256:"+digest)
+	rawURL := c.v2URL(name, "blobs", digest)
 	resp, err := c.do(ctx, http.MethodGet, rawURL, nil, "", -1)
 	if err != nil {
 		return nil, err
@@ -136,15 +139,64 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 	return resp.Body, nil
 }
 
-// PutBlob uploads a blob with a fixed content length.
+// PutBlob uploads a blob via epoch's monolithic single-PUT shortcut at
+// `PUT /v2/<name>/blobs/<digest>`. The digest must include the `sha256:`
+// prefix.
 func (c *Client) PutBlob(ctx context.Context, name, digest string, body io.Reader, size int64) error {
-	return c.putBytes(ctx, c.v2URL(name, "blobs", "sha256:"+digest), "application/octet-stream", body, size, http.StatusCreated)
+	return c.putBytes(ctx, c.v2URL(name, "blobs", digest), "application/octet-stream", body, size, http.StatusCreated)
 }
 
-func (c *Client) apiURL(path string) string {
-	path = strings.TrimLeft(path, "/")
-	return c.baseURL + "/api/" + path
+// --- Catalog / tag listing ---
+
+// Catalog calls `GET /v2/_catalog` and returns the repository list.
+func (c *Client) Catalog(ctx context.Context) ([]string, error) {
+	var resp struct {
+		Repositories []string `json:"repositories"`
+	}
+	if err := c.getJSON(ctx, c.baseURL+"/v2/_catalog", &resp); err != nil {
+		return nil, err
+	}
+	return resp.Repositories, nil
 }
+
+// ListTags calls `GET /v2/<name>/tags/list` and returns the tag list.
+func (c *Client) ListTags(ctx context.Context, name string) ([]string, error) {
+	var resp struct {
+		Tags []string `json:"tags"`
+	}
+	if err := c.getJSON(ctx, fmt.Sprintf("%s/v2/%s/tags/list", c.baseURL, name), &resp); err != nil {
+		return nil, err
+	}
+	return resp.Tags, nil
+}
+
+// DeleteManifest calls `DELETE /v2/<name>/manifests/<reference>`.
+func (c *Client) DeleteManifest(ctx context.Context, name, reference string) error {
+	rawURL := c.v2URL(name, "manifests", reference)
+	resp, err := c.do(ctx, http.MethodDelete, rawURL, nil, "", -1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return c.statusError(http.MethodDelete, rawURL, resp)
+	}
+	return nil
+}
+
+func (c *Client) getJSON(ctx context.Context, rawURL string, out any) error {
+	resp, err := c.do(ctx, http.MethodGet, rawURL, nil, "", -1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return c.statusError(http.MethodGet, rawURL, resp)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// --- HTTP plumbing ---
 
 func (c *Client) v2URL(name, kind, ref string) string {
 	return fmt.Sprintf("%s/v2/%s/%s/%s", c.baseURL, name, kind, ref)
@@ -165,18 +217,6 @@ func (c *Client) do(ctx context.Context, method, rawURL string, body io.Reader, 
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	return c.httpClient.Do(req) //nolint:gosec // registry baseURL is configured by trusted caller
-}
-
-func (c *Client) getBytes(ctx context.Context, method, rawURL string, wantStatus int) ([]byte, error) {
-	resp, err := c.do(ctx, method, rawURL, nil, "", -1)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != wantStatus {
-		return nil, c.statusError(method, rawURL, resp)
-	}
-	return io.ReadAll(resp.Body)
 }
 
 func (c *Client) putBytes(ctx context.Context, rawURL, contentType string, body io.Reader, size int64, wantStatus int) error {

@@ -12,13 +12,18 @@ type Repository struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// Tag is a DB tag record.
+// Tag is a DB tag record. ArtifactType captures the OCI 1.1 manifest
+// artifactType field (e.g. cocoonstack.snapshot.v1+json) so the UI can
+// show whether a tag is a snapshot, cloud image, or container image
+// without re-parsing the manifest JSON on every list call.
 type Tag struct {
 	ID           int64     `json:"id"`
 	RepositoryID int64     `json:"-"`
 	RepoName     string    `json:"repoName,omitempty"`
 	Name         string    `json:"name"`
 	Digest       string    `json:"digest"`
+	ArtifactType string    `json:"artifactType,omitempty"`
+	Kind         string    `json:"kind,omitempty"`
 	ManifestJSON string    `json:"-"`
 	TotalSize    int64     `json:"totalSize"`
 	LayerCount   int       `json:"layerCount"`
@@ -58,11 +63,11 @@ func (r *Repository) scanSummary(row rowScanner) error {
 }
 
 func (t *Tag) scanSummary(row rowScanner) error {
-	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
 }
 
 func (t *Tag) scanDetails(row rowScanner) error {
-	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ManifestJSON, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.ManifestJSON, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
 }
 
 func (t *Token) scan(row rowScanner) error {

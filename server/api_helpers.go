@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -15,14 +16,16 @@ func tagResponse(t *store.Tag) (map[string]any, error) {
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
 	return map[string]any{
-		"repoName":   t.RepoName,
-		"tag":        t.Name,
-		"digest":     t.Digest,
-		"totalSize":  t.TotalSize,
-		"layerCount": t.LayerCount,
-		"pushedAt":   t.PushedAt,
-		"syncedAt":   t.SyncedAt,
-		"manifest":   manifest,
+		"repoName":     t.RepoName,
+		"tag":          t.Name,
+		"digest":       t.Digest,
+		"artifactType": t.ArtifactType,
+		"kind":         t.Kind,
+		"totalSize":    t.TotalSize,
+		"layerCount":   t.LayerCount,
+		"pushedAt":     t.PushedAt,
+		"syncedAt":     t.SyncedAt,
+		"manifest":     manifest,
 	}, nil
 }
 
@@ -32,7 +35,7 @@ func parsePositivePathID(r *http.Request, key string) (int64, error) {
 		return 0, fmt.Errorf("invalid id: %w", err)
 	}
 	if id <= 0 {
-		return 0, fmt.Errorf("invalid id: must be positive")
+		return 0, errors.New("invalid id: must be positive")
 	}
 	return id, nil
 }

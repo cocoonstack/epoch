@@ -26,17 +26,17 @@ func TestDetectManifestMediaType(t *testing.T) {
 		{
 			name: "epoch legacy (no mediaType)",
 			data: `{"schemaVersion":1,"name":"win11","tag":"latest","layers":[]}`,
-			want: manifestMediaType,
+			want: defaultManifestMediaType,
 		},
 		{
 			name: "garbage JSON falls back",
 			data: `not json`,
-			want: manifestMediaType,
+			want: defaultManifestMediaType,
 		},
 		{
 			name: "empty mediaType field falls back",
 			data: `{"mediaType":""}`,
-			want: manifestMediaType,
+			want: defaultManifestMediaType,
 		},
 	}
 	for _, tt := range tests {

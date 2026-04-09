@@ -6,14 +6,10 @@ import (
 	"github.com/cocoonstack/epoch/registryclient"
 )
 
-const defaultServerURL = "http://127.0.0.1:4300"
-
 // resolveConfig returns the server URL and token from environment variables.
+// An empty serverURL is fine — registryclient.New falls back to its own default.
 func resolveConfig() (serverURL, token string) {
 	serverURL = os.Getenv("EPOCH_SERVER")
-	if serverURL == "" {
-		serverURL = defaultServerURL
-	}
 	token = os.Getenv("EPOCH_REGISTRY_TOKEN")
 	return
 }

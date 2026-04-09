@@ -224,11 +224,11 @@ func TestUploadSessionsConcurrentStart(t *testing.T) {
 	u := newUploadSessions()
 	const n = 50
 	ids := make(chan string, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() { ids <- u.Start() }()
 	}
 	seen := make(map[string]bool)
-	for i := 0; i < n; i++ {
+	for range n {
 		id := <-ids
 		if seen[id] {
 			t.Errorf("duplicate id %q", id)

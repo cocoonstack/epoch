@@ -63,6 +63,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			repository_id   BIGINT NOT NULL,
 			name            VARCHAR(255) NOT NULL,
 			digest          CHAR(64) NOT NULL,
+			artifact_type   VARCHAR(255) NOT NULL DEFAULT '',
 			manifest_json   MEDIUMTEXT NOT NULL,
 			total_size      BIGINT NOT NULL DEFAULT 0,
 			layer_count     INT NOT NULL DEFAULT 0,
@@ -97,5 +98,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	// Migration: drop token_plain column (ignore error if already dropped).
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens DROP COLUMN token_plain`)
+	// Migration: add artifact_type to tags (ignore error if column already exists).
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN artifact_type VARCHAR(255) NOT NULL DEFAULT ''`)
 	return nil
 }

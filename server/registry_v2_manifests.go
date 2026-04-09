@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cocoonstack/epoch/utils"
@@ -26,8 +27,7 @@ func (s *Server) loadManifestRaw(r *http.Request, name, ref string) ([]byte, err
 
 // detectManifestMediaType peeks at the top-level `mediaType` field of the
 // stored manifest JSON to round-trip the right Content-Type to OCI clients.
-// Falls back to epoch's own media type when the field is absent (the legacy
-// epoch.Manifest format does not declare one).
+// Falls back to [defaultManifestMediaType] when the field is absent.
 func detectManifestMediaType(data []byte) string {
 	var probe struct {
 		MediaType string `json:"mediaType"`
@@ -35,7 +35,7 @@ func detectManifestMediaType(data []byte) string {
 	if err := json.Unmarshal(data, &probe); err == nil && probe.MediaType != "" {
 		return probe.MediaType
 	}
-	return manifestMediaType
+	return defaultManifestMediaType
 }
 
 // GET /v2/{name}/manifests/{reference}
@@ -60,17 +60,17 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 	digest := utils.SHA256Hex(data)
 	w.Header().Set("Content-Type", detectManifestMediaType(data))
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data) //nolint:gosec // raw registry manifest bytes, not HTML rendering
 }
 
 // HEAD /v2/{name}/manifests/{reference}
 //
-// We deliberately fetch the body (rather than using the metadata-only
-// ManifestHead) so the headers are computed from real bytes — this is the
-// only way to know the right Content-Type when the underlying object store
-// does not retain it as metadata.
+// We deliberately fetch the body (rather than just a HEAD against the object
+// store) so the headers are computed from real bytes — this is the only way
+// to know the right Content-Type when the underlying object store does not
+// retain it as metadata.
 func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	ref := r.PathValue("reference")
@@ -88,16 +88,16 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 	digest := utils.SHA256Hex(data)
 	w.Header().Set("Content-Type", detectManifestMediaType(data))
 	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 }
 
 // PUT /v2/{name}/manifests/{reference}
 //
-// Accepts multiple manifest formats: epoch's own, OCI image manifest, OCI
-// image index, Docker manifest v2 / list. Validation is intentionally
-// lenient — only the JSON shape and (for the epoch format) the embedded
-// `name` field matching the URL are checked. The registry layer is
+// Accepts any well-formed JSON manifest: OCI image manifest, OCI image index,
+// Docker manifest v2 / list, or a cocoonstack snapshot/cloudimg artifact.
+// Validation is intentionally minimal — the registry stores the bytes
+// verbatim and clients re-fetch them unchanged. The registry layer is
 // responsible for the dual tag/digest write.
 func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -113,19 +113,8 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only the legacy epoch format embeds a `name`; if it is present and
-	// disagrees with the URL we reject. OCI / Docker manifests have no such
-	// field, so this branch is a no-op for them.
-	var probe struct {
-		Name string `json:"name"`
-	}
-	if json.Unmarshal(data, &probe) == nil && probe.Name != "" && probe.Name != name {
-		v2Error(w, http.StatusBadRequest, "MANIFEST_INVALID", "manifest name does not match request path")
-		return
-	}
-
 	if err := s.reg.PushManifestJSON(r.Context(), name, ref, data); err != nil {
-		v2Error(w, http.StatusInternalServerError, "MANIFEST_INVALID", err.Error())
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 

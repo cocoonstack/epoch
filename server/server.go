@@ -202,7 +202,7 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, status: 200}
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
 		log.WithFunc("server.withLogging").Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
 	})
@@ -214,7 +214,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(204)
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -238,7 +238,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		http.Error(w, `{"error":"marshal failed"}`, 500)
+		http.Error(w, `{"error":"marshal failed"}`, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

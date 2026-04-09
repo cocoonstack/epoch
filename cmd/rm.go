@@ -11,15 +11,14 @@ import (
 func newRmCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rm <name>:<tag>",
-		Short: "Remove a snapshot tag from the registry",
-		Long: `Removes the manifest for the given name:tag.
-Blobs are NOT deleted (they may be shared by other tags).`,
+		Short: "Remove a manifest tag from the registry",
+		Long: `Removes the manifest at <name>:<tag> via OCI delete.
+Blobs are NOT deleted (they may be shared with other tags).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			name, tag := utils.ParseRef(args[0])
-			client := newRegistryClient()
-			if err := client.Delete(ctx, fmt.Sprintf("/repositories/%s/tags/%s", name, tag)); err != nil {
+			if err := newRegistryClient().DeleteManifest(ctx, name, tag); err != nil {
 				return err
 			}
 			fmt.Printf("Removed %s:%s\n", name, tag)

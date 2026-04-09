@@ -13,6 +13,11 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// tokenExchangeBodyLimit caps the body of an OAuth token / userinfo response.
+// Real responses are a few KB; the cap is here so a hostile or broken IdP
+// cannot stream unbounded bytes.
+const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
+
 func (s *Server) setupAuthRoutes() {
 	s.mux.HandleFunc("GET /login", s.handleLogin)
 	s.mux.HandleFunc("GET /login/callback", s.handleCallback)
@@ -63,44 +68,64 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		http.Error(w, "no code", 400)
+		http.Error(w, "no code", http.StatusBadRequest)
 		return
 	}
 
 	logger := log.WithFunc("server.handleCallback")
+	ctx := r.Context()
 
-	// Exchange code for token
-	tokenResp, err := http.PostForm(s.sso.TokenURL, url.Values{
+	// Exchange code for token. Use NewRequestWithContext so the request
+	// inherits the inbound request's deadline / cancellation.
+	tokenForm := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {s.sso.ClientID},
 		"client_secret": {s.sso.ClientSecret},
 		"redirect_uri":  {s.sso.RedirectURI},
 		"code":          {code},
-	})
+	}
+	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.sso.TokenURL, strings.NewReader(tokenForm.Encode()))
 	if err != nil {
-		logger.Error(r.Context(), err, "token exchange failed")
+		logger.Error(ctx, err, "build token request")
+		http.Error(w, "token exchange failed", http.StatusBadGateway)
+		return
+	}
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResp, err := http.DefaultClient.Do(tokenReq) //nolint:gosec // token URL comes from trusted SSO provider config
+	if err != nil {
+		logger.Error(ctx, err, "token exchange failed")
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = tokenResp.Body.Close() }()
-	body, _ := io.ReadAll(tokenResp.Body)
+	body, err := io.ReadAll(io.LimitReader(tokenResp.Body, tokenExchangeBodyLimit))
+	if err != nil {
+		logger.Error(ctx, err, "token response read")
+		http.Error(w, "invalid token response", http.StatusBadGateway)
+		return
+	}
 	var tok struct {
 		AccessToken string `json:"access_token"` //nolint:gosec // OAuth response schema field name
 		Error       string `json:"error"`
 	}
 	if unmarshalErr := json.Unmarshal(body, &tok); unmarshalErr != nil {
-		logger.Error(r.Context(), unmarshalErr, "token response parse failed")
+		logger.Error(ctx, unmarshalErr, "token response parse failed")
 		http.Error(w, "invalid token response", http.StatusBadGateway)
 		return
 	}
 	if tok.AccessToken == "" {
-		logger.Warnf(r.Context(), "no access_token: %s", body)
+		logger.Warnf(ctx, "no access_token: %s", body)
 		http.Error(w, "SSO login failed: "+tok.Error, http.StatusBadGateway)
 		return
 	}
 
 	// Get user info
-	userReq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, s.sso.UserInfoURL, nil)
+	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, s.sso.UserInfoURL, nil)
+	if err != nil {
+		logger.Error(ctx, err, "build userinfo request")
+		http.Error(w, "userinfo failed", http.StatusBadGateway)
+		return
+	}
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := http.DefaultClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
 	if err != nil {
@@ -108,14 +133,19 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = userResp.Body.Close() }()
-	body, _ = io.ReadAll(userResp.Body)
+	body, err = io.ReadAll(io.LimitReader(userResp.Body, tokenExchangeBodyLimit))
+	if err != nil {
+		logger.Error(ctx, err, "userinfo read")
+		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
+		return
+	}
 	var user struct {
 		Name         string `json:"name"`
 		Email        string `json:"email"`
 		HostedDomain string `json:"hd"`
 	}
 	if err := json.Unmarshal(body, &user); err != nil {
-		logger.Error(r.Context(), err, "userinfo parse failed")
+		logger.Error(ctx, err, "userinfo parse failed")
 		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
 		return
 	}
@@ -134,7 +164,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Name: cookieName, Value: signed,
 		Path: "/", MaxAge: cookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
-	logger.Infof(r.Context(), "sso login: %s <%s>", user.Name, user.Email)
+	logger.Infof(ctx, "sso login: %s <%s>", user.Name, user.Email)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -167,8 +197,8 @@ func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	sess := s.getSession(r)
 	if sess == nil {
-		writeJSON(w, 401, map[string]string{"error": "not logged in"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not logged in"})
 		return
 	}
-	writeJSON(w, 200, map[string]string{"user": sess.User, "email": sess.Email})
+	writeJSON(w, http.StatusOK, map[string]string{"user": sess.User, "email": sess.Email})
 }

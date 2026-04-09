@@ -1,10 +1,21 @@
-// Package registry implements the Epoch snapshot registry backed by an
-// S3-compatible object store.
+// Package registry implements the storage layer of the Epoch OCI registry.
 //
-// It handles push/pull of Cocoon snapshots as content-addressable artifacts:
-//   - Blobs are stored at epoch/blobs/sha256/{digest}
-//   - Manifests at epoch/manifests/{name}/{tag}.json
-//   - Catalog at epoch/catalog.json
+// It is intentionally vendor-agnostic: cocoonstack-specific concepts (cloud
+// images, snapshots) live in the [snapshot] and [cloudimg] packages on top
+// of these primitives. The registry only knows how to store and retrieve
+// blobs and manifests in an S3-compatible object store, plus maintain a
+// global catalog index for the control-plane API.
+//
+// Object layout in the bucket (under the configured prefix, default `epoch/`):
+//
+//	catalog.json                            — global repository index
+//	manifests/<name>/<tag>.json             — manifest by tag
+//	manifests/<name>/_digests/<dgst>.json   — manifest by content digest
+//	blobs/sha256/<dgst>                     — content-addressable blob
+//
+// All blobs are stored under their unprefixed hex digest. Callers that have
+// a `sha256:<hex>` form must strip the prefix before calling [Registry.StreamBlob],
+// [Registry.PullBlob], etc.
 package registry
 
 import (
@@ -16,28 +27,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
-	"github.com/cocoonstack/epoch/utils"
 )
 
-// Registry is the Epoch snapshot registry.
+const catalogCacheTTL = 10 * time.Second
+
+// Registry is the storage facade for an Epoch OCI registry. It is safe for
+// concurrent use.
 type Registry struct {
-	client        *objectstore.Client
+	client *objectstore.Client
+
 	catalogMu     sync.Mutex // guards read-modify-write of catalog.json
-	manifestMeta  sync.Map   // manifestKey → manifestMetaEntry
 	catalogCache  []byte     // cached catalog.json bytes
 	catalogExpiry time.Time  // expiry of catalogCache
-}
-
-type manifestMetaEntry struct {
-	Digest string
-	Size   int64
 }
 
 // New creates a registry backed by the given object store client.
@@ -73,79 +80,30 @@ func NewFromConfigMap(namespace, configmap string) (*Registry, error) {
 
 // --- Blob operations ---
 
-// PushBlob uploads a file as a content-addressable blob.
-// Returns the SHA-256 hex digest and size.
-// Computes the hash in a first pass, then seeks back to upload the content.
-func (r *Registry) PushBlob(ctx context.Context, filePath string) (string, int64, error) {
-	f, err := os.Open(filePath) //nolint:gosec // filePath is from trusted snapshot data dir
-	if err != nil {
-		return "", 0, fmt.Errorf("open %s: %w", filePath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return "", 0, fmt.Errorf("stat %s: %w", filePath, err)
-	}
-	size := info.Size()
-
-	// Hash in a single pass: read file once, computing SHA-256 as we go.
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", 0, fmt.Errorf("hash %s: %w", filePath, err)
-	}
-	digest := hex.EncodeToString(h.Sum(nil))
-
-	// Check if blob already exists (dedup).
-	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
-		return digest, size, nil
-	}
-
-	// Seek back to beginning and upload.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", 0, fmt.Errorf("seek %s: %w", filePath, err)
-	}
-	if err := r.client.Put(ctx, blobKey(digest), f, size); err != nil {
-		return "", 0, fmt.Errorf("upload blob %s: %w", utils.Truncate(digest, 12), err)
-	}
-	return digest, size, nil
-}
-
-// PushBlobFromStream uploads a blob from a stream. The digest must be pre-computed by the caller.
-// For large files (>4GB), it spools to a temp file and uses multipart upload.
+// PushBlobFromStream uploads a blob whose digest the caller has already
+// computed. The digest must be the unprefixed lowercase hex SHA-256.
+// Existing blobs are deduplicated.
 func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body io.Reader, size int64) error {
-	// Check if blob already exists (dedup).
 	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
 		return nil
 	}
-
 	return r.client.Put(ctx, blobKey(digest), body, size)
 }
 
-// BlobExists checks if a blob exists in the registry.
+// BlobExists checks if a blob exists. The digest must be unprefixed hex.
 func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) {
 	return r.client.Exists(ctx, blobKey(digest))
 }
 
-// PullBlob downloads a blob to a local file.
-// Handles both regular and split (>5GB) blobs transparently.
-func (r *Registry) PullBlob(ctx context.Context, digest, destPath string) error {
-	body, _, err := r.client.Get(ctx, blobKey(digest))
-	if err != nil {
-		return fmt.Errorf("get blob %s: %w", utils.Truncate(digest, 12), err)
-	}
-	defer func() { _ = body.Close() }()
+// StreamBlob returns a streaming reader for a blob and its size.
+// Caller must close the returned ReadCloser. The digest must be unprefixed hex.
+func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error) {
+	return r.client.Get(ctx, blobKey(digest))
+}
 
-	f, err := os.Create(destPath) //nolint:gosec // destPath is from trusted snapshot data dir
-	if err != nil {
-		return fmt.Errorf("create %s: %w", destPath, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	if _, err := io.Copy(f, body); err != nil {
-		return fmt.Errorf("write %s: %w", destPath, err)
-	}
-	return nil
+// BlobSize returns the size of a blob without fetching its body.
+func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
+	return r.client.Head(ctx, blobKey(digest))
 }
 
 // DeleteBlob removes a blob from the object store.
@@ -153,16 +111,7 @@ func (r *Registry) DeleteBlob(ctx context.Context, digest string) error {
 	return r.client.Delete(ctx, blobKey(digest))
 }
 
-// StreamBlob returns a streaming reader for a blob from object storage.
-// Caller must close the returned ReadCloser.
-func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error) {
-	return r.client.Get(ctx, blobKey(digest))
-}
-
-// BlobSize returns the actual size of a blob.
-func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
-	return r.client.Head(ctx, blobKey(digest))
-}
+// --- Manifest operations ---
 
 // ManifestJSON returns the raw JSON bytes of a manifest looked up by tag.
 func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, error) {
@@ -187,32 +136,6 @@ func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string
 	return io.ReadAll(body)
 }
 
-// ManifestHead returns the digest and size of a manifest without downloading the body.
-func (r *Registry) ManifestHead(ctx context.Context, name, tag string) (string, int64, error) {
-	key := manifestKey(name, tag)
-	if entry, ok := r.manifestMeta.Load(key); ok {
-		meta := entry.(manifestMetaEntry)
-		return meta.Digest, meta.Size, nil
-	}
-	size, err := r.client.Head(ctx, key)
-	if err != nil {
-		return "", 0, fmt.Errorf("head manifest %s:%s: %w", name, tag, err)
-	}
-	return "", size, nil
-}
-
-// --- Manifest operations ---
-
-// PushManifest uploads a manifest for name:tag. Delegates to PushManifestJSON
-// so the dual tag/digest write happens in exactly one place.
-func (r *Registry) PushManifest(ctx context.Context, m *manifest.Manifest) error {
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	return r.PushManifestJSON(ctx, m.Name, m.Tag, data)
-}
-
 // PushManifestJSON uploads a manifest from raw JSON bytes and updates the
 // catalog. The bytes are written under both the tag key and the content
 // digest key, so the manifest can later be fetched by either reference. The
@@ -231,29 +154,12 @@ func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data 
 	if err := r.client.Put(ctx, tagKey, bytes.NewReader(data), int64(len(data))); err != nil {
 		return fmt.Errorf("upload manifest %s:%s: %w", name, tag, err)
 	}
-	r.manifestMeta.Store(tagKey, manifestMetaEntry{
-		Digest: hex.EncodeToString(h[:]),
-		Size:   int64(len(data)),
-	})
 	return r.updateCatalog(ctx, name, tag)
 }
 
-// PullManifest downloads and parses a manifest.
-func (r *Registry) PullManifest(ctx context.Context, name, tag string) (*manifest.Manifest, error) {
-	body, _, err := r.client.Get(ctx, manifestKey(name, tag))
-	if err != nil {
-		return nil, fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
-	}
-	defer func() { _ = body.Close() }()
-
-	var m manifest.Manifest
-	if err := json.NewDecoder(body).Decode(&m); err != nil {
-		return nil, fmt.Errorf("decode manifest %s:%s: %w", name, tag, err)
-	}
-	return &m, nil
-}
-
-// DeleteManifest removes a manifest.
+// DeleteManifest removes a manifest tag and updates the catalog. The
+// content-addressed copy under `_digests/` is intentionally left in place so
+// re-tagging by digest still works.
 func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	if err := r.client.Delete(ctx, manifestKey(name, tag)); err != nil {
 		return err
@@ -291,8 +197,6 @@ func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 	cat, _, err := r.GetCatalogWithDigest(ctx)
 	return cat, err
 }
-
-const catalogCacheTTL = 10 * time.Second
 
 // GetCatalogWithDigest returns the catalog together with the SHA-256 digest of its raw JSON.
 func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog, string, error) {

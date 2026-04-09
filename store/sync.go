@@ -3,11 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/projecteru2/core/log"
 
@@ -16,8 +17,15 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-var errSyncInProgress = fmt.Errorf("sync already in progress")
+// errSyncInProgress signals that another goroutine is already running
+// SyncFromCatalog. Returned (and silently swallowed by background callers)
+// instead of blocking on the mutex.
+var errSyncInProgress = errors.New("sync already in progress")
 
+// SyncFromCatalog walks the registry catalog and ingests every (repo, tag)
+// into MySQL. Each tag's manifest is parsed as OCI and indexed by digest,
+// artifactType, and aggregate size. Orphaned rows (repos / tags that no
+// longer appear in the catalog) are deleted in a second pass.
 func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) error {
 	if !s.mu.TryLock() {
 		return errSyncInProgress
@@ -63,8 +71,13 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	return nil
 }
 
+// syncTag fetches a single manifest from the registry, parses it, and writes
+// the tag + its blob descriptors into the SQL transaction.
 func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry, repoID int64, repoName, tagName string) error {
-	existing, _ := s.getTagDigest(ctx, repoID, tagName)
+	existing, dbErr := s.getTagDigest(ctx, repoID, tagName)
+	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
+		log.WithFunc("store.syncTag").Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
+	}
 
 	raw, err := reg.ManifestJSON(ctx, repoName, tagName)
 	if err != nil {
@@ -76,29 +89,32 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 		return nil
 	}
 
-	var m manifest.Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m, err := manifest.Parse(raw)
+	if err != nil {
 		return fmt.Errorf("decode manifest %s:%s: %w", repoName, tagName, err)
+	}
+
+	totalSize := m.Config.Size
+	for _, layer := range m.Layers {
+		totalSize += layer.Size
 	}
 
 	t := Tag{
 		Name:         tagName,
 		Digest:       digest,
+		ArtifactType: m.ArtifactType,
 		ManifestJSON: string(raw),
-		TotalSize:    m.TotalSize,
-		LayerCount:   len(m.Layers) + len(m.BaseImages),
-		PushedAt:     m.PushedAt,
+		TotalSize:    totalSize,
+		LayerCount:   len(m.Layers),
+		PushedAt:     manifestPushedAt(m),
 	}
 	if err := upsertTagTx(ctx, tx, repoID, t); err != nil {
 		return err
 	}
 
-	allLayers := make([]manifest.Layer, 0, len(m.Layers)+len(m.BaseImages))
-	allLayers = append(allLayers, m.Layers...)
-	allLayers = append(allLayers, m.BaseImages...)
-	if err := batchUpsertBlobsTx(ctx, tx, allLayers); err != nil {
-		logger := log.WithFunc("store.syncTag")
-		logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
+	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
+	if err := batchUpsertBlobsTx(ctx, tx, descriptors); err != nil {
+		log.WithFunc("store.syncTag").Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
 	}
 	return nil
 }
@@ -120,34 +136,48 @@ func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, er
 
 func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO tags (repository_id, name, digest, manifest_json, total_size, layer_count, pushed_at, synced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+		INSERT INTO tags (repository_id, name, digest, artifact_type, manifest_json, total_size, layer_count, pushed_at, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
-			digest=VALUES(digest), manifest_json=VALUES(manifest_json),
+			digest=VALUES(digest), artifact_type=VALUES(artifact_type), manifest_json=VALUES(manifest_json),
 			total_size=VALUES(total_size), layer_count=VALUES(layer_count),
 			pushed_at=VALUES(pushed_at), synced_at=NOW()`,
-		repoID, t.Name, t.Digest, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PushedAt)
+		repoID, t.Name, t.Digest, t.ArtifactType, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PushedAt)
 	return err
 }
 
-func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, layers []manifest.Layer) error {
-	if len(layers) == 0 {
+// manifestPushedAt returns the manifest's `org.opencontainers.image.created`
+// annotation parsed as RFC 3339, or the current time if the annotation is
+// missing or unparseable.
+func manifestPushedAt(m *manifest.OCIManifest) time.Time {
+	if v, ok := m.Annotations[manifest.AnnotationCreated]; ok {
+		if ts, err := time.Parse(time.RFC3339, v); err == nil {
+			return ts
+		}
+	}
+	return time.Now().UTC()
+}
+
+// batchUpsertBlobsTx records every descriptor referenced by a manifest into
+// the blobs table so the UI / control plane has a single index of every
+// content-addressable object in the registry. Failures are not fatal — the
+// caller logs and continues so an unindexed blob does not block the tag
+// upsert.
+func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, descriptors []manifest.Descriptor) error {
+	if len(descriptors) == 0 {
 		return nil
 	}
 	const batchSize = 100
-	for i := 0; i < len(layers); i += batchSize {
-		end := min(i+batchSize, len(layers))
-		batch := layers[i:end]
-
+	for batch := range slices.Chunk(descriptors, batchSize) {
 		var sb strings.Builder
 		sb.WriteString(`INSERT INTO blobs (digest, size, media_type, ref_count) VALUES `)
 		args := make([]any, 0, len(batch)*3)
-		for j, layer := range batch {
+		for j, d := range batch {
 			if j > 0 {
 				sb.WriteString(",")
 			}
 			sb.WriteString("(?,?,?,1)")
-			args = append(args, layer.Digest, layer.Size, layer.MediaType)
+			args = append(args, strings.TrimPrefix(d.Digest, "sha256:"), d.Size, d.MediaType)
 		}
 		sb.WriteString(` ON DUPLICATE KEY UPDATE size=VALUES(size), media_type=VALUES(media_type)`)
 		if _, err := tx.ExecContext(ctx, sb.String(), args...); err != nil {
@@ -158,6 +188,8 @@ func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, layers []manifest.Layer
 }
 
 func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
+	logger := log.WithFunc("store.cleanOrphans")
+
 	type repositoryRef struct {
 		ID   int64
 		Name string
@@ -167,13 +199,16 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 		return rows.Scan(&repo.ID, &repo.Name)
 	})
 	if err != nil {
+		logger.Warnf(ctx, "list repositories: %v", err)
 		return
 	}
 
 	for _, repoRef := range repos {
 		repo, exists := cat.Repositories[repoRef.Name]
 		if !exists {
-			_, _ = s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repoRef.ID)
+			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repoRef.ID); delErr != nil {
+				logger.Warnf(ctx, "delete orphan repository %s: %v", repoRef.Name, delErr)
+			}
 			continue
 		}
 
@@ -181,13 +216,30 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 			return rows.Scan(tagName)
 		}, repoRef.ID)
 		if err != nil {
+			logger.Warnf(ctx, "list tags for %s: %v", repoRef.Name, err)
 			continue
 		}
 
 		for _, tagName := range tagNames {
 			if _, ok := repo.Tags[tagName]; !ok {
-				_, _ = s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, repoRef.ID, tagName)
+				if _, delErr := s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, repoRef.ID, tagName); delErr != nil {
+					logger.Warnf(ctx, "delete orphan tag %s:%s: %v", repoRef.Name, tagName, delErr)
+				}
 			}
 		}
+	}
+}
+
+// artifactKindString maps an OCI artifactType to the human-readable kind name
+// used by the UI. Falls back to "container-image" for empty / unknown values
+// because plain container images don't carry an artifactType.
+func artifactKindString(artifactType string) string {
+	switch artifactType {
+	case manifest.ArtifactTypeSnapshot:
+		return manifest.KindSnapshot.String()
+	case manifest.ArtifactTypeOSImage:
+		return manifest.KindCloudImage.String()
+	default:
+		return manifest.KindContainerImage.String()
 	}
 }

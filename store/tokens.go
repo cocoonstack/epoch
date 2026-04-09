@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -56,10 +55,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 }
 
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
-	s.tokenCache.Range(func(key, _ any) bool {
-		s.tokenCache.Delete(key)
-		return true
-	})
+	s.InvalidateTokenCache()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id)
 	return err
 }
@@ -110,5 +106,8 @@ func (s *Store) startTokenCacheCleanup(ctx context.Context) {
 
 // InvalidateTokenCache clears all cached token validations.
 func (s *Store) InvalidateTokenCache() {
-	s.tokenCache = sync.Map{}
+	s.tokenCache.Range(func(key, _ any) bool {
+		s.tokenCache.Delete(key)
+		return true
+	})
 }

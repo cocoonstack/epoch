@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/cocoonstack/epoch/objectstore"
@@ -20,8 +21,8 @@ func TestIsNotFound(t *testing.T) {
 	if !isNotFound(objectstore.ErrNotFound) {
 		t.Fatalf("expected objectstore.ErrNotFound to match")
 	}
-	if !isNotFound(errors.New("404 page missing")) {
-		t.Fatalf("expected 404-style error to match")
+	if !isNotFound(fmt.Errorf("get manifest: %w", objectstore.ErrNotFound)) {
+		t.Fatalf("expected wrapped objectstore.ErrNotFound to match via errors.Is")
 	}
 	if isNotFound(errors.New("boom")) {
 		t.Fatalf("unexpected match for unrelated error")

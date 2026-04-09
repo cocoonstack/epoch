@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // uploadBodyLimit caps any single PATCH/PUT body. The actual cap on a full
 // upload is enforced by uploadSessions.maxBytes; this is just a per-request
-// safety net so a single PATCH cannot read forever.
-const uploadBodyLimit = int64(20) << 30 // 20 GiB
+// safety net so a single PATCH cannot read forever. Kept aligned with
+// defaultUploadMaxBytes so the per-request and per-session limits agree.
+const uploadBodyLimit = defaultUploadMaxBytes
 
 // v2InitBlobUpload handles `POST /v2/{name}/blobs/uploads/`.
 //
@@ -51,7 +53,7 @@ func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", uploadLocation(name, id))
 	w.Header().Set("Docker-Upload-UUID", id)
-	w.Header().Set("Range", fmt.Sprintf("0-%d", size-1))
+	w.Header().Set("Range", "0-"+strconv.Itoa(size-1))
 	w.WriteHeader(http.StatusAccepted)
 }
 
