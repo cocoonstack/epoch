@@ -164,11 +164,24 @@ func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
 	return r.client.Head(ctx, blobKey(digest))
 }
 
-// ManifestJSON returns the raw JSON bytes of a manifest without parsing.
+// ManifestJSON returns the raw JSON bytes of a manifest looked up by tag.
 func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, error) {
 	body, _, err := r.client.Get(ctx, manifestKey(name, tag))
 	if err != nil {
 		return nil, fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
+	}
+	defer func() { _ = body.Close() }()
+	return io.ReadAll(body)
+}
+
+// ManifestJSONByDigest returns the raw JSON bytes of a manifest looked up by
+// content digest. OCI clients (go-containerregistry, docker, buildah) push by
+// tag and then re-fetch by digest after resolving — this read path is what
+// closes that loop.
+func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error) {
+	body, _, err := r.client.Get(ctx, manifestDigestKey(name, digest))
+	if err != nil {
+		return nil, fmt.Errorf("get manifest %s@%s: %w", name, digest, err)
 	}
 	defer func() { _ = body.Close() }()
 	return io.ReadAll(body)
@@ -190,34 +203,35 @@ func (r *Registry) ManifestHead(ctx context.Context, name, tag string) (string, 
 
 // --- Manifest operations ---
 
-// PushManifest uploads a manifest for name:tag.
+// PushManifest uploads a manifest for name:tag. Delegates to PushManifestJSON
+// so the dual tag/digest write happens in exactly one place.
 func (r *Registry) PushManifest(ctx context.Context, m *manifest.Manifest) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-
-	key := manifestKey(m.Name, m.Tag)
-	if err := r.client.Put(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
-		return fmt.Errorf("upload manifest %s:%s: %w", m.Name, m.Tag, err)
-	}
-	h := sha256.Sum256(data)
-	r.manifestMeta.Store(key, manifestMetaEntry{
-		Digest: hex.EncodeToString(h[:]),
-		Size:   int64(len(data)),
-	})
-
-	return r.updateCatalog(ctx, m.Name, m.Tag)
+	return r.PushManifestJSON(ctx, m.Name, m.Tag, data)
 }
 
-// PushManifestJSON uploads a manifest from raw JSON bytes and updates the catalog.
+// PushManifestJSON uploads a manifest from raw JSON bytes and updates the
+// catalog. The bytes are written under both the tag key and the content
+// digest key, so the manifest can later be fetched by either reference. The
+// digest write happens first (it is idempotent and content-addressed), so a
+// failure between writes leaves no dangling tag pointer.
 func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data []byte) error {
-	key := manifestKey(name, tag)
-	if err := r.client.Put(ctx, key, bytes.NewReader(data), int64(len(data))); err != nil {
+	h := sha256.Sum256(data)
+	digest := "sha256:" + hex.EncodeToString(h[:])
+
+	digestKey := manifestDigestKey(name, digest)
+	if err := r.client.Put(ctx, digestKey, bytes.NewReader(data), int64(len(data))); err != nil {
+		return fmt.Errorf("upload manifest %s@%s: %w", name, digest, err)
+	}
+
+	tagKey := manifestKey(name, tag)
+	if err := r.client.Put(ctx, tagKey, bytes.NewReader(data), int64(len(data))); err != nil {
 		return fmt.Errorf("upload manifest %s:%s: %w", name, tag, err)
 	}
-	h := sha256.Sum256(data)
-	r.manifestMeta.Store(key, manifestMetaEntry{
+	r.manifestMeta.Store(tagKey, manifestMetaEntry{
 		Digest: hex.EncodeToString(h[:]),
 		Size:   int64(len(data)),
 	})
@@ -247,14 +261,20 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	return r.removeCatalogEntry(ctx, name, tag)
 }
 
-// ListTags returns all tags for a repository.
+// ListTags returns all tags for a repository. Manifests stored under the
+// per-name `_digests/` subdirectory (the by-digest copies) are skipped — they
+// are content-addressed pointers to the same data, not user-facing tags.
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
 	keys, err := r.client.List(ctx, "manifests/"+name+"/")
 	if err != nil {
 		return nil, err
 	}
+	digestPrefix := "manifests/" + name + "/_digests/"
 	var tags []string
 	for _, k := range keys {
+		if strings.HasPrefix(k, digestPrefix) {
+			continue
+		}
 		// k is like "manifests/sre-agent/v2.json"
 		tag := extractTag(k)
 		if tag != "" {
@@ -296,14 +316,22 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 	return &cat, hex.EncodeToString(h[:]), nil
 }
 
+// getCatalogRaw returns the raw catalog JSON bytes, populating the cache on
+// miss. Acquires the catalog mutex; do not call from a context where the
+// mutex is already held — use getCatalogRawLocked instead.
 func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
 	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
+	return r.getCatalogRawLocked(ctx)
+}
+
+// getCatalogRawLocked is the cache-aware catalog reader. The caller must hold
+// r.catalogMu — this is what lets updateCatalog and removeCatalogEntry call it
+// without re-entering the (non-reentrant) mutex.
+func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 	if r.catalogCache != nil && time.Now().Before(r.catalogExpiry) {
-		cached := r.catalogCache
-		r.catalogMu.Unlock()
-		return cached, nil
+		return r.catalogCache, nil
 	}
-	r.catalogMu.Unlock()
 
 	body, _, err := r.client.Get(ctx, "catalog.json")
 	if errors.Is(err, objectstore.ErrNotFound) {
@@ -319,14 +347,34 @@ func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	r.catalogMu.Lock()
 	r.catalogCache = raw
 	r.catalogExpiry = time.Now().Add(catalogCacheTTL)
-	r.catalogMu.Unlock()
 	return raw, nil
 }
 
-func (r *Registry) invalidateCatalogCache() {
+// getCatalogLocked returns the parsed catalog. Caller must hold r.catalogMu.
+func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, error) {
+	raw, err := r.getCatalogRawLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
+	}
+	var cat manifest.Catalog
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return nil, err
+	}
+	if cat.Repositories == nil {
+		cat.Repositories = make(map[string]*manifest.Repository)
+	}
+	return &cat, nil
+}
+
+// invalidateCatalogCacheLocked drops the cached catalog. Caller must hold
+// r.catalogMu — the function name and the locked-suffix convention exist to
+// match the rest of the catalog accessors and prevent re-entrancy bugs.
+func (r *Registry) invalidateCatalogCacheLocked() {
 	r.catalogCache = nil
 	r.catalogExpiry = time.Time{}
 }
@@ -335,7 +383,7 @@ func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 
-	cat, err := r.GetCatalog(ctx)
+	cat, err := r.getCatalogLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("get catalog: %w", err)
 	}
@@ -356,7 +404,7 @@ func (r *Registry) removeCatalogEntry(ctx context.Context, name, tag string) err
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 
-	cat, err := r.GetCatalog(ctx)
+	cat, err := r.getCatalogLocked(ctx)
 	if err != nil {
 		return err
 	}
@@ -379,7 +427,7 @@ func (r *Registry) putCatalog(ctx context.Context, cat *manifest.Catalog) error 
 	if err := r.client.Put(ctx, "catalog.json", bytes.NewReader(data), int64(len(data))); err != nil {
 		return err
 	}
-	r.invalidateCatalogCache()
+	r.invalidateCatalogCacheLocked()
 	return nil
 }
 
@@ -391,6 +439,13 @@ func blobKey(digest string) string {
 
 func manifestKey(name, tag string) string {
 	return "manifests/" + name + "/" + tag + ".json"
+}
+
+// manifestDigestKey is the object store key for a manifest looked up by its
+// content digest. The colon in `sha256:abc...` is replaced with a dash so the
+// key works on object stores that disallow colons in path components.
+func manifestDigestKey(name, digest string) string {
+	return "manifests/" + name + "/_digests/" + strings.ReplaceAll(digest, ":", "-") + ".json"
 }
 
 func extractTag(key string) string {
