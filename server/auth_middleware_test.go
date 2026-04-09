@@ -13,24 +13,18 @@ func TestIsPublicPath(t *testing.T) {
 		"/login/callback",
 		"/logout",
 		"/dl/win11",
-		"/image/ubuntu",
-		// Bare cloud-image short form: GET /<name> with no dot.
-		// handleImageOrUI dispatches these to handleCloudImageDownload.
-		"/win11",
-		"/ubuntu",
-		"/healthcheck", // single segment, no dot — handler answers 404 if missing
+		"/dl/ubuntu-22.04", // dots in image name now work via /dl/
 	}
 	private := []string{
 		"/",
 		"/v2/",
 		"/v2/foo/manifests/latest",
 		"/api/repositories",
-		// Multi-segment paths still require auth.
-		"/foo/bar",
-		// Single segment WITH a dot is treated as a UI asset, not a bare image.
 		"/favicon.ico",
 		"/style.css",
-		"/ubuntu-22.04",
+		// Bare paths no longer bypass auth (removed handleImageOrUI).
+		"/win11",
+		"/ubuntu",
 	}
 	for _, p := range public {
 		if !isPublicPath(p) {
@@ -157,8 +151,8 @@ func TestWithAuthV2WriteOpenWhenNoTokenConfigured(t *testing.T) {
 	}
 }
 
-// TestWithAuthDownloadIsPublic ensures /dl/ and /image/ bypass auth even
-// when a token is configured.
+// TestWithAuthDownloadIsPublic ensures /dl/ bypasses auth even when a
+// token is configured.
 func TestWithAuthDownloadIsPublic(t *testing.T) {
 	hit := 0
 	s := &Server{registryToken: "secret"}
@@ -166,7 +160,7 @@ func TestWithAuthDownloadIsPublic(t *testing.T) {
 		hit++
 	}))
 
-	for _, path := range []string{"/dl/win11", "/image/ubuntu"} {
+	for _, path := range []string{"/dl/win11", "/dl/ubuntu-22.04"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

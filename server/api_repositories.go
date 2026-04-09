@@ -97,7 +97,7 @@ func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-// POST /api/sync
+// POST /api/catalog/sync
 func (s *Server) apiSync(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SyncFromCatalog(r.Context(), s.reg); err != nil {
 		writeError(w, 500, err.Error())

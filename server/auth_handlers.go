@@ -17,7 +17,7 @@ func (s *Server) setupAuthRoutes() {
 	s.mux.HandleFunc("GET /login", s.handleLogin)
 	s.mux.HandleFunc("GET /login/callback", s.handleCallback)
 	s.mux.HandleFunc("GET /logout", s.handleLogout)
-	s.mux.HandleFunc("GET /api/me", s.handleMe)
+	s.mux.HandleFunc("GET /auth/me", s.handleMe)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

@@ -119,7 +119,7 @@ func (s *Server) v2Token(w http.ResponseWriter, r *http.Request) {
 }
 
 // extractTokenCandidate pulls the credential value out of whichever delivery
-// method the client used. Returns "" if no recognised credential was supplied.
+// method the client used. Returns "" if no recognized credential was supplied.
 // Order of precedence is Basic header > form body > query param so a client
 // that supplies more than one consistent way still works.
 func extractTokenCandidate(r *http.Request) string {

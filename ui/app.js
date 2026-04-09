@@ -324,7 +324,7 @@ async function doSync() {
   btn.disabled = true;
   btn.textContent = 'Syncing\u2026';
   try {
-    await fetch('/api/sync', { method: 'POST' });
+    await fetch('/api/catalog/sync', { method: 'POST' });
     route();
   } catch (e) {
     btn.textContent = 'Failed';

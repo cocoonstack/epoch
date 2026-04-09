@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/projecteru2/core/log"
 )
@@ -55,27 +54,4 @@ func (s *Server) handleCloudImageDownload(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-}
-
-// handleImageOrUI is the catch-all `GET /{name}` route. It serves cloud image
-// downloads at top-level paths so consumers can use simple URLs like
-// `https://epoch.example/win11`, while still allowing the embedded UI's asset
-// files (`/favicon.ico`, `/style.css`, ...) to resolve.
-//
-// The disambiguator is intentionally simple: any path component containing a
-// `.` is treated as a UI asset and forwarded to the file server. The trade-off
-// is that image names containing dots (e.g. `ubuntu-22.04`) are not reachable
-// via the bare route — those callers must use the unambiguous `/dl/{name}` or
-// `/image/{name}` paths.
-func (s *Server) handleImageOrUI(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if strings.Contains(name, ".") {
-		if s.uiHandler != nil {
-			s.uiHandler.ServeHTTP(w, r)
-			return
-		}
-		http.NotFound(w, r)
-		return
-	}
-	s.handleCloudImageDownload(w, r)
 }

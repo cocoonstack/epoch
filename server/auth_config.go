@@ -98,15 +98,15 @@ func loadProviderConfig(provider string) *SSOConfig {
 	switch provider {
 	case providerGoogle:
 		return &SSOConfig{
-			Provider:     providerGoogle,
-			ClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
-			ClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
-			RedirectURI:  os.Getenv("GOOGLE_OAUTH_REDIRECT_URI"),
-			AuthorizeURL: utils.FirstNonEmpty(os.Getenv("SSO_AUTHORIZE_URL"), defaultGoogleAuthorizeURL),
-			TokenURL:     utils.FirstNonEmpty(os.Getenv("SSO_TOKEN_URL"), defaultGoogleTokenURL),
-			UserInfoURL:  utils.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
-			LogoutURL:    os.Getenv("SSO_LOGOUT_URL"),
-			Scopes:       utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
+			Provider:      providerGoogle,
+			ClientID:      os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
+			ClientSecret:  os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
+			RedirectURI:   os.Getenv("GOOGLE_OAUTH_REDIRECT_URI"),
+			AuthorizeURL:  utils.FirstNonEmpty(os.Getenv("SSO_AUTHORIZE_URL"), defaultGoogleAuthorizeURL),
+			TokenURL:      utils.FirstNonEmpty(os.Getenv("SSO_TOKEN_URL"), defaultGoogleTokenURL),
+			UserInfoURL:   utils.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
+			LogoutURL:     os.Getenv("SSO_LOGOUT_URL"),
+			Scopes:        utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
 			HostedDomains: parseHostedDomains(os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN")),
 		}
 	case "oidc":

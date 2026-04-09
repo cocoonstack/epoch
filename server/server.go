@@ -104,63 +104,57 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) setupRoutes(ctx context.Context) {
-	// Registry V2 pull API.
-	s.mux.HandleFunc("GET /v2/", s.v2Check)
+	// Registry V2 — fixed paths.
+	s.mux.HandleFunc("GET /v2/{$}", s.v2Check)
 	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
-	s.mux.HandleFunc("GET /v2/{name}/tags/list", s.v2TagsList)
-	s.mux.HandleFunc("GET /v2/{name}/manifests/{reference}", s.v2GetManifest)
-	s.mux.HandleFunc("HEAD /v2/{name}/manifests/{reference}", s.v2HeadManifest)
-	s.mux.HandleFunc("GET /v2/{name}/blobs/{digest}", s.v2GetBlob)
-	s.mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", s.v2HeadBlob)
-
-	// Registry V2 push API.
-	s.mux.HandleFunc("PUT /v2/{name}/blobs/{digest}", s.v2PutBlob)
-	s.mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", s.v2PutManifest)
-
-	// OCI Distribution blob upload protocol (chunked + monolithic). Required
-	// for go-containerregistry, docker, and buildah push clients that do not
-	// know about epoch's PUT-by-digest shortcut.
-	s.mux.HandleFunc("POST /v2/{name}/blobs/uploads/", s.v2InitBlobUpload)
-	s.mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", s.v2PatchBlobUpload)
-	s.mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", s.v2CompleteBlobUpload)
-
-	// OCI Distribution token issuer. The Bearer challenge sent on 401 points
-	// here so docker/oras can complete the standard token handshake using
-	// HTTP Basic auth with the registry token as the password. Distribution
-	// Spec §6 lets clients use either GET (with query params) or POST (with
-	// form data); both are accepted because in practice docker uses GET and
-	// oras uses POST.
 	s.mux.HandleFunc("GET /v2/token", s.v2Token)
 	s.mux.HandleFunc("POST /v2/token", s.v2Token)
 
-	// Control plane API.
+	// Registry V2 — wildcard dispatch for multi-segment repository names.
+	// Go's ServeMux does not support {name...} in the middle of a pattern,
+	// so we capture everything after /v2/ and parse it in v2_router.go.
+	s.mux.HandleFunc("GET /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionManifests: s.v2GetManifest,
+		v2ActionBlobs:     s.v2GetBlob,
+		v2ActionTags:      s.v2TagsList,
+	}))
+	s.mux.HandleFunc("HEAD /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionManifests: s.v2HeadManifest,
+		v2ActionBlobs:     s.v2HeadBlob,
+	}))
+	s.mux.HandleFunc("PUT /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionManifests: s.v2PutManifest,
+		v2ActionBlobs:     s.v2PutBlob,
+		v2ActionUploads:   s.v2CompleteBlobUpload,
+	}))
+	s.mux.HandleFunc("POST /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionUploads: s.v2InitBlobUpload,
+	}))
+	s.mux.HandleFunc("PATCH /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionUploads: s.v2PatchBlobUpload,
+	}))
+
+	// Control plane API — fixed paths.
 	s.mux.HandleFunc("GET /api/stats", s.apiStats)
 	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)
-	s.mux.HandleFunc("GET /api/repositories/{name}", s.apiGetRepository)
-	s.mux.HandleFunc("GET /api/repositories/{name}/tags", s.apiListTags)
-	s.mux.HandleFunc("GET /api/repositories/{name}/tags/{tag}", s.apiGetTag)
-	s.mux.HandleFunc("DELETE /api/repositories/{name}/tags/{tag}", s.apiDeleteTag)
-	s.mux.HandleFunc("POST /api/sync", s.apiSync)
-
-	// Token management (SSO-protected via withAuth middleware).
+	s.mux.HandleFunc("POST /api/catalog/sync", s.apiSync)
 	s.mux.HandleFunc("GET /api/tokens", s.apiListTokens)
 	s.mux.HandleFunc("POST /api/tokens", s.apiCreateToken)
 	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.apiDeleteToken)
 
-	// Public cloud image download endpoints (auth-exempt).
-	s.mux.HandleFunc("GET /dl/{name}", s.handleCloudImageDownload)
-	s.mux.HandleFunc("GET /image/{name}", s.handleCloudImageDownload)
+	// Control plane API — wildcard dispatch for multi-segment repo names.
+	s.mux.HandleFunc("GET /api/repositories/{path...}", s.apiRepoDispatchGET)
+	s.mux.HandleFunc("DELETE /api/repositories/{path...}", s.apiRepoDispatchDELETE)
 
-	// Frontend. The catch-all GET /{name} route serves cloud image downloads
-	// at the top level (e.g. /win11) and falls through to the embedded UI
-	// file server for paths that look like asset files (anything containing
-	// a dot — see handleImageOrUI for the disambiguation rule).
+	// Public cloud image download (auth-exempt, single canonical path).
+	s.mux.HandleFunc("GET /dl/{name}", s.handleCloudImageDownload)
+
+	// Frontend — embedded UI.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
 		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
 	}
 	s.uiHandler = http.FileServer(http.FS(uiFS))
-	s.mux.HandleFunc("GET /{name}", s.handleImageOrUI)
 	s.mux.Handle("GET /", s.uiHandler)
 }
 
