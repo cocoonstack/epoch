@@ -105,7 +105,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) setupRoutes(ctx context.Context) {
 	// Registry V2 — fixed paths.
+	//
+	// Both GET and HEAD on /v2/{$} go through v2Check (the OCI Distribution
+	// "ping" endpoint). Go 1.22+ requires the HEAD pattern to be explicit
+	// when there is a sibling wildcard registered for HEAD on /v2/{path...},
+	// otherwise mux registration panics with "pattern conflict".
 	s.mux.HandleFunc("GET /v2/{$}", s.v2Check)
+	s.mux.HandleFunc("HEAD /v2/{$}", s.v2Check)
 	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
 	s.mux.HandleFunc("GET /v2/token", s.v2Token)
 	s.mux.HandleFunc("POST /v2/token", s.v2Token)
