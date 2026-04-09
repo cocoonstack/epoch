@@ -25,7 +25,29 @@ func isPublicPath(path string) bool {
 			return true
 		}
 	}
+	// Bare cloud-image short form: GET /<name>. handleImageOrUI dispatches by
+	// the same rule (no `.` in the segment ⇒ cloud image download), so unauth
+	// callers can pull artifacts via the convenient short URL the same way
+	// they can via /dl/<name> and /image/<name>. Path components containing
+	// `.` (favicon.ico, *.css, *.js, ubuntu-22.04 …) keep the SSO/UI flow.
+	if isBareImagePath(path) {
+		return true
+	}
 	return false
+}
+
+// isBareImagePath returns true for paths that look like a bare cloud-image
+// download URL: a single path segment that contains no dot, e.g. "/win11".
+// Root ("/") is excluded so the UI front page still requires SSO when enabled.
+func isBareImagePath(path string) bool {
+	if len(path) < 2 || path[0] != '/' {
+		return false
+	}
+	rest := path[1:]
+	if strings.ContainsAny(rest, "/.") {
+		return false
+	}
+	return true
 }
 
 // isV2WriteMethod returns true for HTTP methods that mutate /v2/ state.

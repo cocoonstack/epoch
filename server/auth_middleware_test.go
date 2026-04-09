@@ -14,14 +14,23 @@ func TestIsPublicPath(t *testing.T) {
 		"/logout",
 		"/dl/win11",
 		"/image/ubuntu",
+		// Bare cloud-image short form: GET /<name> with no dot.
+		// handleImageOrUI dispatches these to handleCloudImageDownload.
+		"/win11",
+		"/ubuntu",
+		"/healthcheck", // single segment, no dot — handler answers 404 if missing
 	}
 	private := []string{
 		"/",
 		"/v2/",
 		"/v2/foo/manifests/latest",
 		"/api/repositories",
-		"/foo",
-		"/healthcheck", // not exactly /healthz
+		// Multi-segment paths still require auth.
+		"/foo/bar",
+		// Single segment WITH a dot is treated as a UI asset, not a bare image.
+		"/favicon.ico",
+		"/style.css",
+		"/ubuntu-22.04",
 	}
 	for _, p := range public {
 		if !isPublicPath(p) {
