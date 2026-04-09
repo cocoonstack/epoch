@@ -174,6 +174,33 @@ func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, 
 	return io.ReadAll(body)
 }
 
+// ManifestJSONByDigest retrieves a manifest stored by its SHA-256 digest.
+// This supports OCI clients that reference manifests by digest (e.g. after
+// resolving a multi-arch index to a platform-specific manifest).
+func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error) {
+	body, _, err := r.client.Get(ctx, manifestDigestKey(name, digest))
+	if err != nil {
+		return nil, fmt.Errorf("get manifest %s@%s: %w", name, digest, err)
+	}
+	defer func() { _ = body.Close() }()
+	return io.ReadAll(body)
+}
+
+// StoreManifestByDigest stores a manifest keyed by its digest.
+// This enables retrieval by sha256:xxx reference.
+func (r *Registry) StoreManifestByDigest(ctx context.Context, name, digest string, data []byte) error {
+	return r.client.Put(ctx, manifestDigestKey(name, digest), bytes.NewReader(data), int64(len(data)))
+}
+
+// PushBlobFromReader uploads a blob from in-memory data.
+// Used by the OCI blob upload flow where the server buffers the upload body.
+func (r *Registry) PushBlobFromReader(ctx context.Context, digest string, data []byte) error {
+	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
+		return nil
+	}
+	return r.client.Put(ctx, blobKey(digest), bytes.NewReader(data), int64(len(data)))
+}
+
 // ManifestHead returns the digest and size of a manifest without downloading the body.
 func (r *Registry) ManifestHead(ctx context.Context, name, tag string) (string, int64, error) {
 	key := manifestKey(name, tag)
@@ -298,12 +325,17 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 
 func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
 	r.catalogMu.Lock()
-	if r.catalogCache != nil && time.Now().Before(r.catalogExpiry) {
-		cached := r.catalogCache
-		r.catalogMu.Unlock()
-		return cached, nil
-	}
+	raw, err := r.getCatalogRawLocked(ctx)
 	r.catalogMu.Unlock()
+	return raw, err
+}
+
+// getCatalogRawLocked reads the catalog (from cache or object store).
+// Must be called with r.catalogMu held.
+func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
+	if r.catalogCache != nil && time.Now().Before(r.catalogExpiry) {
+		return r.catalogCache, nil
+	}
 
 	body, _, err := r.client.Get(ctx, "catalog.json")
 	if errors.Is(err, objectstore.ErrNotFound) {
@@ -319,11 +351,29 @@ func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 
-	r.catalogMu.Lock()
 	r.catalogCache = raw
 	r.catalogExpiry = time.Now().Add(catalogCacheTTL)
-	r.catalogMu.Unlock()
 	return raw, nil
+}
+
+// getCatalogLocked reads and parses the catalog.
+// Must be called with r.catalogMu held.
+func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, error) {
+	raw, err := r.getCatalogRawLocked(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
+	}
+	var cat manifest.Catalog
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return nil, err
+	}
+	if cat.Repositories == nil {
+		cat.Repositories = make(map[string]*manifest.Repository)
+	}
+	return &cat, nil
 }
 
 func (r *Registry) invalidateCatalogCache() {
@@ -335,7 +385,7 @@ func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 
-	cat, err := r.GetCatalog(ctx)
+	cat, err := r.getCatalogLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("get catalog: %w", err)
 	}
@@ -356,7 +406,7 @@ func (r *Registry) removeCatalogEntry(ctx context.Context, name, tag string) err
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 
-	cat, err := r.GetCatalog(ctx)
+	cat, err := r.getCatalogLocked(ctx)
 	if err != nil {
 		return err
 	}
@@ -391,6 +441,11 @@ func blobKey(digest string) string {
 
 func manifestKey(name, tag string) string {
 	return "manifests/" + name + "/" + tag + ".json"
+}
+
+func manifestDigestKey(name, digest string) string {
+	// digest is "sha256:abcdef..."
+	return "manifests/" + name + "/_digests/" + strings.ReplaceAll(digest, ":", "-") + ".json"
 }
 
 func extractTag(key string) string {

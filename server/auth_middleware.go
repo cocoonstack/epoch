@@ -6,20 +6,31 @@ import (
 )
 
 // withAuth protects routes that require login.
-// /v2/ requires Bearer token (machine clients). UI/API require SSO session.
+// /v2/ write ops require a Bearer token (machine clients); GET/HEAD on /v2/
+// and cloud image downloads (/dl/, /image/) are public so cocoon consumers
+// can pull without credentials. UI/API require SSO session.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Always allow: health, login/logout
-		if path == "/healthz" || strings.HasPrefix(path, "/login") || strings.HasPrefix(path, "/logout") {
+		// Always allow: health, login/logout, cloud image download.
+		if path == "/healthz" ||
+			strings.HasPrefix(path, "/login") ||
+			strings.HasPrefix(path, "/logout") ||
+			strings.HasPrefix(path, "/dl/") ||
+			strings.HasPrefix(path, "/image/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// /v2/ — Bearer token auth for machine clients
+		// /v2/ — Bearer token auth for write ops only. GET/HEAD are public so
+		// cocoon consumers can pull images without credentials.
 		if strings.HasPrefix(path, "/v2/") { //nolint:nestif // auth middleware has inherent branching
-			if s.registryToken != "" || s.store != nil {
+			isWrite := r.Method == http.MethodPut ||
+				r.Method == http.MethodPost ||
+				r.Method == http.MethodDelete ||
+				r.Method == http.MethodPatch
+			if isWrite && (s.registryToken != "" || s.store != nil) {
 				auth := r.Header.Get("Authorization")
 				token := strings.TrimPrefix(auth, "Bearer ")
 				valid := false
@@ -33,7 +44,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				}
 				if !valid {
 					w.Header().Set("WWW-Authenticate", `Bearer realm="epoch"`)
-					v2Error(w, 401, "UNAUTHORIZED", "valid Bearer token required")
+					v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Bearer token required")
 					return
 				}
 			}

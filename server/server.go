@@ -32,6 +32,7 @@ type Server struct {
 	mux           *http.ServeMux
 	sso           *SSOConfig // nil = UI auth disabled
 	registryToken string     // Bearer token for /v2/ (empty = no token required)
+	uiHandler     http.Handler
 }
 
 // New creates a new server.
@@ -114,6 +115,12 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.mux.HandleFunc("PUT /v2/{name}/blobs/{digest}", s.v2PutBlob)
 	s.mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", s.v2PutManifest)
 
+	// OCI Distribution blob upload protocol (chunked + monolithic).
+	// Required for go-containerregistry / docker / buildah push clients.
+	s.mux.HandleFunc("POST /v2/{name}/blobs/uploads/", s.v2InitBlobUpload)
+	s.mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", s.v2PatchBlobUpload)
+	s.mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", s.v2CompleteBlobUpload)
+
 	// Control plane API.
 	s.mux.HandleFunc("GET /api/stats", s.apiStats)
 	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)
@@ -128,12 +135,20 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.mux.HandleFunc("POST /api/tokens", s.apiCreateToken)
 	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.apiDeleteToken)
 
-	// Frontend.
+	// Public cloud image download (no auth).
+	s.mux.HandleFunc("GET /dl/{name}", s.handleDownload)
+	s.mux.HandleFunc("GET /image/{name}", s.handleDownload)
+
+	// Frontend. The catch-all GET /{name} route handles cloud image downloads
+	// at the top level (e.g. /win11) and falls through to the UI file server
+	// for asset paths with file extensions.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
 		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
 	}
-	s.mux.Handle("GET /", http.FileServer(http.FS(uiFS)))
+	s.uiHandler = http.FileServer(http.FS(uiFS))
+	s.mux.HandleFunc("GET /{name}", s.handleImageOrUI)
+	s.mux.Handle("GET /", s.uiHandler)
 }
 
 func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {
