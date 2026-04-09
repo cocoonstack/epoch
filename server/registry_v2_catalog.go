@@ -6,8 +6,29 @@ import (
 )
 
 // GET /v2/
+//
+// The Distribution Spec uses this endpoint as the registry-discovery probe
+// (clients call it `Ping`). For registries that require authentication, the
+// spec says it should return 401 with a Bearer challenge so the client knows
+// where to fetch a token from. go-containerregistry, crane, docker, and
+// containerd cache that challenge for the lifetime of the connection and
+// reuse it on every subsequent request — including pushes.
+//
+// Returning 200 when auth is configured is what most clients interpret as
+// "anonymous registry, no challenge needed", and they then never bother
+// running the bearer flow on a later 401. So we serve 401-with-challenge
+// when no valid credential was presented and 200 once the client authenticates.
+//
+// Other GET /v2/* paths (manifests, blobs, tags/list, _catalog) remain
+// publicly readable per the cocoon design — only this discovery endpoint
+// gates on credentials.
 func (s *Server) v2Check(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Distribution-API-Version", "registry/2.0")
+	if s.v2WritesRequireAuth() && !s.validateBearer(r) {
+		w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
+		v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
 	writeJSON(w, 200, map[string]any{})
 }
 

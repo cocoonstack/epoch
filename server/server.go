@@ -124,6 +124,15 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", s.v2PatchBlobUpload)
 	s.mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", s.v2CompleteBlobUpload)
 
+	// OCI Distribution token issuer. The Bearer challenge sent on 401 points
+	// here so docker/oras can complete the standard token handshake using
+	// HTTP Basic auth with the registry token as the password. Distribution
+	// Spec §6 lets clients use either GET (with query params) or POST (with
+	// form data); both are accepted because in practice docker uses GET and
+	// oras uses POST.
+	s.mux.HandleFunc("GET /v2/token", s.v2Token)
+	s.mux.HandleFunc("POST /v2/token", s.v2Token)
+
 	// Control plane API.
 	s.mux.HandleFunc("GET /api/stats", s.apiStats)
 	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)

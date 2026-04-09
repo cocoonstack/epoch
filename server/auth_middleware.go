@@ -7,12 +7,14 @@ import (
 
 // publicPathPrefixes lists path prefixes that bypass auth entirely. Cloud
 // image downloads are public so vk-cocoon and other consumers can pull
-// without holding a registry token.
+// without holding a registry token. The OCI Distribution token issuer is
+// also listed because it does its own basic-auth check internally.
 var publicPathPrefixes = []string{
 	"/login",
 	"/logout",
 	"/dl/",
 	"/image/",
+	"/v2/token",
 }
 
 // isPublicPath returns true for paths that bypass authentication entirely.
@@ -101,7 +103,7 @@ func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handl
 		next.ServeHTTP(w, r)
 		return
 	}
-	w.Header().Set("WWW-Authenticate", `Bearer realm="epoch"`)
+	w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
 	v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Bearer token required")
 }
 
