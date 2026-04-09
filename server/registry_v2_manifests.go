@@ -92,6 +92,25 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// DELETE /v2/{name}/manifests/{reference}
+//
+// Removes a manifest tag and updates the catalog. Per OCI Distribution spec,
+// this is the documented way for OCI clients (oras, crane, docker manifest rm)
+// to delete a tag from a registry. Blobs are intentionally left behind for GC.
+func (s *Server) v2DeleteManifest(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	ref := r.PathValue("reference")
+	if err := s.reg.DeleteManifest(r.Context(), name, ref); err != nil {
+		if isNotFound(err) {
+			v2Error(w, http.StatusNotFound, "MANIFEST_UNKNOWN", fmt.Sprintf("manifest %s:%s not found", name, ref))
+			return
+		}
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
 // PUT /v2/{name}/manifests/{reference}
 //
 // Accepts any well-formed JSON manifest: OCI image manifest, OCI image index,

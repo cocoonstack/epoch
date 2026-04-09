@@ -132,6 +132,9 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.mux.HandleFunc("PATCH /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
 		v2ActionUploads: s.v2PatchBlobUpload,
 	}))
+	s.mux.HandleFunc("DELETE /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
+		v2ActionManifests: s.v2DeleteManifest,
+	}))
 
 	// Control plane API — fixed paths.
 	s.mux.HandleFunc("GET /api/stats", s.apiStats)
