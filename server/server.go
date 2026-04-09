@@ -104,22 +104,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) setupRoutes(ctx context.Context) {
-	// Registry V2 — fixed paths.
+	// Registry V2 — every method routes through the wildcard dispatcher.
 	//
-	// `/v2/_catalog` and `/v2/token` are exact matches and don't overlap
-	// with the wildcard. The OCI Distribution "ping" endpoint at the bare
-	// `/v2/` path is handled inline by the wildcard dispatch (an empty
-	// path is the ping signal) — registering it as a separate `/v2/{$}`
-	// handler causes Go 1.22+ ServeMux to flag a conflict against the
-	// HEAD `/v2/{path...}` wildcard.
-	s.mux.HandleFunc("GET /v2/_catalog", s.v2Catalog)
-	s.mux.HandleFunc("GET /v2/token", s.v2Token)
-	s.mux.HandleFunc("POST /v2/token", s.v2Token)
-
-	// Registry V2 — wildcard dispatch for multi-segment repository names.
-	// Go's ServeMux does not support {name...} in the middle of a pattern,
-	// so we capture everything after /v2/ and parse it in v2_router.go.
-	// Empty `path` is the ping endpoint (`GET /v2/` / `HEAD /v2/`).
+	// Go 1.22+ ServeMux flags any exact-match `GET /v2/<x>` as conflicting
+	// with `HEAD /v2/{path...}` because exact-method GET handlers also
+	// implicitly serve HEAD, and the wildcard would otherwise overlap.
+	// Folding `_catalog`, `token`, and the bare `/v2/` ping into the
+	// wildcard dispatcher avoids the conflict and keeps a single routing
+	// surface for the OCI Distribution endpoints.
 	s.mux.HandleFunc("GET /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
 		v2ActionManifests: s.v2GetManifest,
 		v2ActionBlobs:     s.v2GetBlob,

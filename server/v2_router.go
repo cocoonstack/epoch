@@ -87,15 +87,33 @@ func setV2PathValues(r *http.Request, route v2Route) {
 // v2Dispatch creates an http.HandlerFunc that parses the {path...} wildcard,
 // looks up the action in the provided handler map, and dispatches accordingly.
 //
-// An empty `path` (request to bare `/v2/`) is the OCI Distribution "ping"
-// endpoint and routes to v2Check regardless of method. The wildcard owns the
-// ping registration so we can avoid a `/v2/{$}` rule that Go's ServeMux
-// flags as conflicting with the wildcard pattern.
+// Special path values are handled inline before parseV2Path runs, because
+// folding them into the wildcard avoids registering exact-match GET handlers
+// that Go 1.22+ ServeMux flags as conflicting with the HEAD wildcard:
+//
+//   - empty / "/" — OCI Distribution ping (v2Check)
+//   - "_catalog"  — repository catalog list (v2Catalog, GET only)
+//   - "token"     — token issuer endpoint (v2Token, GET/POST)
 func (s *Server) v2Dispatch(handlers map[string]func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw := r.PathValue("path")
-		if raw == "" || raw == "/" {
+		switch raw {
+		case "", "/":
 			s.v2Check(w, r)
+			return
+		case "_catalog":
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				s.v2Catalog(w, r)
+				return
+			}
+			v2Error(w, http.StatusMethodNotAllowed, "UNSUPPORTED", "method not allowed")
+			return
+		case "token":
+			if r.Method == http.MethodGet || r.Method == http.MethodPost {
+				s.v2Token(w, r)
+				return
+			}
+			v2Error(w, http.StatusMethodNotAllowed, "UNSUPPORTED", "method not allowed")
 			return
 		}
 		route, ok := parseV2Path(raw)
