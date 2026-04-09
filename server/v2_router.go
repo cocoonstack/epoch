@@ -86,9 +86,19 @@ func setV2PathValues(r *http.Request, route v2Route) {
 
 // v2Dispatch creates an http.HandlerFunc that parses the {path...} wildcard,
 // looks up the action in the provided handler map, and dispatches accordingly.
+//
+// An empty `path` (request to bare `/v2/`) is the OCI Distribution "ping"
+// endpoint and routes to v2Check regardless of method. The wildcard owns the
+// ping registration so we can avoid a `/v2/{$}` rule that Go's ServeMux
+// flags as conflicting with the wildcard pattern.
 func (s *Server) v2Dispatch(handlers map[string]func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		route, ok := parseV2Path(r.PathValue("path"))
+		raw := r.PathValue("path")
+		if raw == "" || raw == "/" {
+			s.v2Check(w, r)
+			return
+		}
+		route, ok := parseV2Path(raw)
 		if !ok {
 			v2Error(w, http.StatusNotFound, "NAME_UNKNOWN", "invalid repository path")
 			return
