@@ -9,7 +9,7 @@ func TestClassify(t *testing.T) {
 		want Kind
 	}{
 		{
-			name: "windows oci artifact (artifactType cloudimg)",
+			name: "cloud image (unified os-image artifactType)",
 			raw: `{
 				"schemaVersion": 2,
 				"mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -17,6 +17,19 @@ func TestClassify(t *testing.T) {
 				"config": {"mediaType":"application/vnd.oci.empty.v1+json","digest":"sha256:44","size":2},
 				"layers": [
 					{"mediaType":"application/vnd.cocoonstack.disk.qcow2.part","digest":"sha256:aa","size":1}
+				]
+			}`,
+			want: KindCloudImage,
+		},
+		{
+			name: "legacy windows-image artifactType (cocoonstack/windows builder)",
+			raw: `{
+				"schemaVersion": 2,
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"artifactType": "application/vnd.cocoonstack.windows-image.v1+json",
+				"config": {"mediaType":"application/vnd.oci.empty.v1+json","digest":"sha256:44","size":2},
+				"layers": [
+					{"mediaType":"application/vnd.cocoonstack.windows.disk.qcow2.part","digest":"sha256:aa","size":1}
 				]
 			}`,
 			want: KindCloudImage,
@@ -186,6 +199,10 @@ func TestIsDiskMediaType(t *testing.T) {
 		MediaTypeDiskQcow2Part,
 		MediaTypeDiskRaw,
 		MediaTypeDiskRawPart,
+		MediaTypeWindowsDiskQcow2,
+		MediaTypeWindowsDiskQcow2Part,
+		MediaTypeWindowsDiskRaw,
+		MediaTypeWindowsDiskRawPart,
 	}
 	no := []string{
 		MediaTypeVMConfig,

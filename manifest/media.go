@@ -24,9 +24,15 @@ const (
 	// manifest and are how epoch decides whether an artifact is a cloud image
 	// or a VM snapshot. A manifest without one of these is treated as a
 	// regular container image (or unknown).
+	//
+	// ArtifactTypeOSImage is the unified cocoonstack cloud-image type going
+	// forward. ArtifactTypeWindowsImage is the legacy name still produced by
+	// cocoonstack/windows's GitHub Actions workflow; epoch recognizes both
+	// so existing published artifacts keep working.
 
-	ArtifactTypeOSImage  = "application/vnd.cocoonstack.os-image.v1+json"
-	ArtifactTypeSnapshot = "application/vnd.cocoonstack.snapshot.v1+json"
+	ArtifactTypeOSImage      = "application/vnd.cocoonstack.os-image.v1+json"
+	ArtifactTypeWindowsImage = "application/vnd.cocoonstack.windows-image.v1+json"
+	ArtifactTypeSnapshot     = "application/vnd.cocoonstack.snapshot.v1+json"
 
 	// --- Snapshot config blob (the OCI manifest's config field, not a layer) ---
 
@@ -41,6 +47,16 @@ const (
 	MediaTypeDiskQcow2Part = "application/vnd.cocoonstack.disk.qcow2.part"
 	MediaTypeDiskRaw       = "application/vnd.cocoonstack.disk.raw"
 	MediaTypeDiskRawPart   = "application/vnd.cocoonstack.disk.raw.part"
+
+	// Legacy windows-specific disk media types still produced by
+	// cocoonstack/windows's build pipeline. Treated identically to the
+	// generic cocoonstack disk types so existing published artifacts pull
+	// without requiring a republish.
+
+	MediaTypeWindowsDiskQcow2     = "application/vnd.cocoonstack.windows.disk.qcow2"
+	MediaTypeWindowsDiskQcow2Part = "application/vnd.cocoonstack.windows.disk.qcow2.part"
+	MediaTypeWindowsDiskRaw       = "application/vnd.cocoonstack.windows.disk.raw"
+	MediaTypeWindowsDiskRawPart   = "application/vnd.cocoonstack.windows.disk.raw.part"
 
 	// --- Snapshot-specific layer media types ---
 	//
@@ -97,12 +113,14 @@ func MediaTypeForCocoonFile(name string) string {
 }
 
 // IsDiskMediaType reports whether mt is a cocoonstack disk layer mediaType
-// (qcow2/raw, whole or split). Used by cloudimg.Stream to decide which layers
-// to concatenate.
+// (qcow2/raw, whole or split, generic or windows-specific legacy). Used by
+// cloudimg.Stream to decide which layers to concatenate.
 func IsDiskMediaType(mt string) bool {
 	switch mt {
 	case MediaTypeDiskQcow2, MediaTypeDiskQcow2Part,
-		MediaTypeDiskRaw, MediaTypeDiskRawPart:
+		MediaTypeDiskRaw, MediaTypeDiskRawPart,
+		MediaTypeWindowsDiskQcow2, MediaTypeWindowsDiskQcow2Part,
+		MediaTypeWindowsDiskRaw, MediaTypeWindowsDiskRawPart:
 		return true
 	}
 	return false

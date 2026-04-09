@@ -116,7 +116,7 @@ func Classify(raw []byte) (Kind, error) {
 	}
 
 	switch probe.ArtifactType {
-	case ArtifactTypeOSImage:
+	case ArtifactTypeOSImage, ArtifactTypeWindowsImage:
 		return KindCloudImage, nil
 	case ArtifactTypeSnapshot:
 		return KindSnapshot, nil
