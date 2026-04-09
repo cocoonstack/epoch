@@ -31,8 +31,28 @@ type SSOConfig struct {
 	UserInfoURL  string
 	LogoutURL    string
 	Scopes       string
-	HostedDomain string
-	CookieSecret []byte
+	// HostedDomains holds the allow-list of Google Workspace domains.
+	// Sourced from GOOGLE_OAUTH_HOSTED_DOMAIN as a comma-separated list, e.g.
+	// "simular.ai,computer-use.org". An empty slice disables the check.
+	HostedDomains []string
+	CookieSecret  []byte
+}
+
+// parseHostedDomains splits a comma-separated GOOGLE_OAUTH_HOSTED_DOMAIN value
+// into a normalized slice (lowercased, trimmed, empty entries dropped).
+func parseHostedDomains(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(strings.ToLower(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // LoadSSOConfig reads optional UI auth configuration from the environment.
@@ -87,7 +107,7 @@ func loadProviderConfig(provider string) *SSOConfig {
 			UserInfoURL:  utils.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
 			LogoutURL:    os.Getenv("SSO_LOGOUT_URL"),
 			Scopes:       utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
-			HostedDomain: os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN"),
+			HostedDomains: parseHostedDomains(os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN")),
 		}
 	case "oidc":
 		return &SSOConfig{

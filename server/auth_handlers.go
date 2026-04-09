@@ -37,8 +37,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"scope":         {utils.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
 		"state":         {state},
 	}
-	if s.sso.Provider == providerGoogle && s.sso.HostedDomain != "" {
-		params.Set("hd", s.sso.HostedDomain)
+	// Google's OAuth `hd` parameter takes a single domain. When the operator
+	// configures multiple allowed domains, omit the hint entirely and rely on
+	// the post-callback domain check to enforce membership; sending a joined
+	// list would silently reject everyone.
+	if s.sso.Provider == providerGoogle && len(s.sso.HostedDomains) == 1 {
+		params.Set("hd", s.sso.HostedDomains[0])
 	}
 	http.Redirect(w, r, s.sso.AuthorizeURL+"?"+params.Encode(), http.StatusFound)
 }
@@ -118,11 +122,9 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	if user.Name == "" {
 		user.Name = user.Email
 	}
-	if s.sso.HostedDomain != "" {
-		if user.HostedDomain != s.sso.HostedDomain && !strings.HasSuffix(strings.ToLower(user.Email), "@"+strings.ToLower(s.sso.HostedDomain)) {
-			http.Error(w, "account is not in the allowed Google Workspace domain", http.StatusForbidden)
-			return
-		}
+	if len(s.sso.HostedDomains) > 0 && !userMatchesHostedDomain(user.HostedDomain, user.Email, s.sso.HostedDomains) {
+		http.Error(w, "account is not in the allowed Google Workspace domain", http.StatusForbidden)
+		return
 	}
 
 	// Set session cookie
@@ -143,6 +145,23 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// userMatchesHostedDomain returns true if the OAuth-reported hosted domain or
+// the email's domain part is in the configured allow-list. Comparisons are
+// case-insensitive; allowed entries are assumed to already be normalized.
+func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
+	hd := strings.ToLower(userHD)
+	emailLower := strings.ToLower(email)
+	for _, d := range allowed {
+		if hd != "" && hd == d {
+			return true
+		}
+		if strings.HasSuffix(emailLower, "@"+d) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

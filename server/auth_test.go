@@ -27,8 +27,52 @@ func TestLoadSSOConfigGoogle(t *testing.T) {
 	if len(cfg.CookieSecret) != 32 {
 		t.Fatalf("CookieSecret length = %d, want 32", len(cfg.CookieSecret))
 	}
-	if cfg.HostedDomain != "example.com" {
-		t.Fatalf("HostedDomain = %q, want example.com", cfg.HostedDomain)
+	if len(cfg.HostedDomains) != 1 || cfg.HostedDomains[0] != "example.com" {
+		t.Fatalf("HostedDomains = %v, want [example.com]", cfg.HostedDomains)
+	}
+}
+
+func TestLoadSSOConfigGoogleMultiDomain(t *testing.T) {
+	t.Setenv("SSO_PROVIDER", "google")
+	t.Setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
+	t.Setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
+	t.Setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8080/login/callback")
+	t.Setenv("GOOGLE_OAUTH_HOSTED_DOMAIN", "simular.ai, computer-use.org ,, ")
+	t.Setenv("SSO_COOKIE_SECRET", "")
+
+	cfg := LoadSSOConfig(context.Background())
+	if cfg == nil {
+		t.Fatalf("LoadSSOConfig returned nil")
+	}
+	want := []string{"simular.ai", "computer-use.org"}
+	if len(cfg.HostedDomains) != len(want) {
+		t.Fatalf("HostedDomains = %v, want %v", cfg.HostedDomains, want)
+	}
+	for i, d := range want {
+		if cfg.HostedDomains[i] != d {
+			t.Fatalf("HostedDomains[%d] = %q, want %q", i, cfg.HostedDomains[i], d)
+		}
+	}
+}
+
+func TestUserMatchesHostedDomain(t *testing.T) {
+	allowed := []string{"simular.ai", "computer-use.org"}
+	cases := []struct {
+		userHD, email string
+		want          bool
+	}{
+		{"simular.ai", "alice@simular.ai", true},
+		{"", "bob@computer-use.org", true},
+		{"computer-use.org", "carol@computer-use.org", true},
+		{"", "eve@gmail.com", false},
+		{"gmail.com", "eve@gmail.com", false},
+		{"", "ALICE@Simular.AI", true},
+	}
+	for _, tc := range cases {
+		got := userMatchesHostedDomain(tc.userHD, tc.email, allowed)
+		if got != tc.want {
+			t.Errorf("userMatchesHostedDomain(%q,%q,%v) = %v, want %v", tc.userHD, tc.email, allowed, got, tc.want)
+		}
 	}
 }
 
