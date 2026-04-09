@@ -21,7 +21,7 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 		SilenceUsage: true,
 	}
 
-	root.PersistentFlags().StringVar(&flagRootDir, "root-dir", "/var/lib/cocoon", "Cocoon root directory (for push/pull local snapshot data)")
+	root.PersistentFlags().StringVar(&flagRootDir, "root-dir", "/var/lib/cocoon", "Cocoon root directory (used by push to read local snapshot data)")
 
 	root.AddCommand(
 		newPushCmd(),

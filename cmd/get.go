@@ -36,27 +36,35 @@ Examples:
   epoch get ubuntu-base:latest | cocoon image import ubuntu-base`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
 			name, tag := utils.ParseRef(args[0])
-			return streamArtifact(cmd.Context(), name, tag, os.Stdout)
+			client := newRegistryClient()
+			m, err := fetchManifest(ctx, client, name, tag)
+			if err != nil {
+				return err
+			}
+			return streamArtifactBody(ctx, client, name, m, os.Stdout)
 		},
 	}
 }
 
-func streamArtifact(ctx context.Context, name, tag string, w io.Writer) error {
-	client := newRegistryClient()
-
+// fetchManifest downloads the manifest for name:tag and logs a one-line header to stderr.
+func fetchManifest(ctx context.Context, client *registryclient.Client, name, tag string) (*manifest.Manifest, error) {
 	fmt.Fprintf(os.Stderr, "fetching manifest %s:%s from %s ...\n", name, tag, client.BaseURL())
-
 	m, err := client.GetManifest(ctx, name, tag)
 	if err != nil {
-		return fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
+		return nil, fmt.Errorf("get manifest %s:%s: %w", name, tag, err)
 	}
+	return m, nil
+}
 
+// streamArtifactBody writes the manifest body to w, picking the format based on the
+// manifest type: a tar archive for snapshots, raw qcow2 bytes for cloud images.
+func streamArtifactBody(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
 	if m.IsCloudImage() {
 		fmt.Fprintf(os.Stderr, "type: cloud image (%d layers, %s)\n", len(m.Layers), utils.HumanSize(m.TotalSize))
 		return streamCloudImage(ctx, client, name, m, w)
 	}
-
 	fmt.Fprintf(os.Stderr, "type: snapshot (%d layers, %s)\n", len(m.Layers), utils.HumanSize(m.TotalSize))
 	return streamSnapshot(ctx, client, name, m, w)
 }
@@ -125,9 +133,12 @@ func streamSnapshot(ctx context.Context, client *registryclient.Client, name str
 
 // streamCloudImage writes raw qcow2 data to w,
 // compatible with cocoon image import (auto-detects format).
+//
+// No bufio wrapper here on purpose: cloud image layers can be tens of GB, and
+// io.Copy from an HTTP body to an *os.File destination (e.g. an exec stdin
+// pipe) takes the splice fast-path on Linux only when the destination is the
+// raw fd, not a wrapped buffered writer.
 func streamCloudImage(ctx context.Context, client *registryclient.Client, name string, m *manifest.Manifest, w io.Writer) error {
-	bw := bufio.NewWriterSize(w, 256<<10)
-
 	for _, layer := range m.Layers {
 		fmt.Fprintf(os.Stderr, "  streaming %s (%s)...\n", layer.Filename, utils.HumanSize(layer.Size))
 
@@ -135,15 +146,11 @@ func streamCloudImage(ctx context.Context, client *registryclient.Client, name s
 		if err != nil {
 			return fmt.Errorf("get blob %s: %w", layer.Filename, err)
 		}
-		if _, copyErr := io.Copy(bw, body); copyErr != nil {
+		if _, copyErr := io.Copy(w, body); copyErr != nil {
 			body.Close() //nolint:errcheck,gosec
 			return fmt.Errorf("stream %s: %w", layer.Filename, copyErr)
 		}
 		body.Close() //nolint:errcheck,gosec
-	}
-
-	if err := bw.Flush(); err != nil {
-		return fmt.Errorf("flush output: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "done: %s:%s (%s)\n", name, m.Tag, utils.HumanSize(m.TotalSize))

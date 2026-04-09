@@ -134,13 +134,31 @@ export EPOCH_S3_SECURE=false
 ```bash
 epoch serve           # start HTTP server
 epoch push NAME:TAG   # push a local cocoon snapshot to the registry
-epoch pull NAME:TAG   # pull a snapshot and write to cocoon's local storage
+epoch pull NAME:TAG   # pull and import via the cocoon CLI (see below)
 epoch get  NAME:TAG   # stream a snapshot or cloud image to stdout (see below)
 epoch ls [NAME]       # list repositories or tags
 epoch inspect NAME:TAG # show manifest details (JSON)
 epoch tag SRC DST     # create a new tag from an existing manifest
 epoch rm  NAME:TAG    # remove a tag
 ```
+
+### `epoch pull`
+
+`epoch pull` fetches an artifact from the registry and pipes it directly into
+the local `cocoon` CLI for import — no temporary files, no direct writes to
+`/var/lib/cocoon`. It is exactly equivalent to running `epoch get | cocoon …
+import`, picking the right cocoon subcommand based on the manifest type:
+
+- **Snapshots** → `cocoon snapshot import --name <name>`
+- **Cloud images** → `cocoon image import <name>`
+
+```bash
+epoch pull myvm:v1                       # snapshot, imports as "myvm"
+epoch pull myvm:v1 --name myvm-restored  # snapshot with overridden name
+epoch pull ubuntu-base:latest            # cloud image, imports as "ubuntu-base"
+```
+
+The `cocoon` binary must be on `PATH`; override with `EPOCH_COCOON_BINARY`.
 
 ### Streaming with `epoch get`
 
