@@ -33,8 +33,7 @@ type SSOConfig struct {
 	LogoutURL    string
 	Scopes       string
 	// HostedDomains holds the allow-list of Google Workspace domains.
-	// Sourced from GOOGLE_OAUTH_HOSTED_DOMAIN as a comma-separated list, e.g.
-	// "simular.ai,computer-use.org". An empty slice disables the check.
+	// Sourced from GOOGLE_OAUTH_HOSTED_DOMAIN as a comma-separated list
 	HostedDomains []string
 	CookieSecret  []byte
 }

@@ -27,7 +27,7 @@ const (
 
 // publicBaseURL returns the absolute base URL clients should use for token
 // fetches. Preference order:
-//  1. EPOCH_PUBLIC_URL env var (operator-configured, e.g. https://epoch.simular.cloud)
+//  1. EPOCH_PUBLIC_URL env var (operator-configured, e.g. https://epoch.cmgs.me)
 //  2. https://<request Host> when X-Forwarded-Proto says https or the request itself is TLS
 //  3. http://<request Host> as a last resort
 //

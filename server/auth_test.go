@@ -37,14 +37,14 @@ func TestLoadSSOConfigGoogleMultiDomain(t *testing.T) {
 	t.Setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id")
 	t.Setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret")
 	t.Setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8080/login/callback")
-	t.Setenv("GOOGLE_OAUTH_HOSTED_DOMAIN", "simular.ai, computer-use.org ,, ")
+	t.Setenv("GOOGLE_OAUTH_HOSTED_DOMAIN", "cmgs.me, gitup.me ,, ")
 	t.Setenv("SSO_COOKIE_SECRET", "")
 
 	cfg := LoadSSOConfig(context.Background())
 	if cfg == nil {
 		t.Fatalf("LoadSSOConfig returned nil")
 	}
-	want := []string{"simular.ai", "computer-use.org"}
+	want := []string{"cmgs.me", "gitup.me"}
 	if len(cfg.HostedDomains) != len(want) {
 		t.Fatalf("HostedDomains = %v, want %v", cfg.HostedDomains, want)
 	}
@@ -56,17 +56,17 @@ func TestLoadSSOConfigGoogleMultiDomain(t *testing.T) {
 }
 
 func TestUserMatchesHostedDomain(t *testing.T) {
-	allowed := []string{"simular.ai", "computer-use.org"}
+	allowed := []string{"cmgs.me", "gitup.me"}
 	cases := []struct {
 		userHD, email string
 		want          bool
 	}{
-		{"simular.ai", "alice@simular.ai", true},
-		{"", "bob@computer-use.org", true},
-		{"computer-use.org", "carol@computer-use.org", true},
+		{"cmgs.me", "alice@cmgs.me", true},
+		{"", "bob@gitup.me", true},
+		{"gitup.me", "carol@gitup.me", true},
 		{"", "eve@gmail.com", false},
 		{"gmail.com", "eve@gmail.com", false},
-		{"", "ALICE@Simular.AI", true},
+		{"", "ALICE@CMGS.ME", true},
 	}
 	for _, tc := range cases {
 		got := userMatchesHostedDomain(tc.userHD, tc.email, allowed)
