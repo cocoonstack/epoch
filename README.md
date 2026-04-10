@@ -180,6 +180,7 @@ make build          # produces ./epoch
 | `epoch-server.yaml` | Kubernetes Deployment template |
 | `Dockerfile` | Container image build |
 | `epoch-server.service` | systemd unit file |
+| `epoch-nginx.conf` | nginx vhost — required tuning for streaming multi-GiB OCI pushes |
 
 ## Quick Start
 
