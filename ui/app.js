@@ -53,6 +53,19 @@ function platformLabel(p) {
   return parts.length ? parts.join('/') : '\u2014';
 }
 
+// layerTitle returns the human filename of a manifest layer descriptor. OCI
+// 1.1 stores it under annotations["org.opencontainers.image.title"] (set by
+// epoch's snapshot Pusher); the legacy v1 epoch schema used a top-level
+// `filename` field. Read both so old and new manifests render correctly.
+function layerTitle(l) {
+  if (!l) return '\u2014';
+  if (l.filename) return l.filename;
+  if (l.annotations && l.annotations['org.opencontainers.image.title']) {
+    return l.annotations['org.opencontainers.image.title'];
+  }
+  return '\u2014';
+}
+
 // badgeKinds mirrors the strings emitted by manifest.Kind.String() on the
 // server. Anything outside this set falls back to "unknown" so the function
 // is safe to call with raw API values without HTML-escaping.
@@ -180,6 +193,11 @@ async function renderTagDetail(el, name, tag) {
     // child manifests. Each entry carries platform.{architecture,os,variant}
     // and is content-addressed via its sha256 digest.
     const platforms = m.manifests || [];
+    // snapshotConfig is the decoded contents of the snapshot config blob,
+    // inlined by the server only when kind == snapshot. Has snapshotId,
+    // image, cpu, memory, storage, nics. Other kinds get an empty object so
+    // the conditional render below cleanly skips the snapshot-only cards.
+    const cfg = data.snapshotConfig || null;
     const maxSize = Math.max(...layers.map(l => l.size || 0), 1);
 
     render(el, `
@@ -197,18 +215,20 @@ async function renderTagDetail(el, name, tag) {
       <div class="pull-cmd"><span class="prompt">$ </span><span class="cmd">epoch pull</span> <span class="arg">${name}:${tag}</span></div>
 
       <div class="detail-grid">
-        <div class="detail-card">
-          <div class="detail-label">Snapshot ID</div>
-          <div class="detail-value mono">${m.snapshotId || '\u2014'}</div>
-        </div>
-        <div class="detail-card span-2">
-          <div class="detail-label">Source Image</div>
-          <div class="detail-value mono">${m.image || '\u2014'}</div>
-        </div>
-        <div class="detail-card">
-          <div class="detail-label">Resources</div>
-          <div class="detail-value">${m.cpu || 0} vCPU &middot; ${humanSize(m.memory || 0)} RAM &middot; ${humanSize(m.storage || 0)} Disk</div>
-        </div>
+        ${cfg ? `
+          <div class="detail-card">
+            <div class="detail-label">Snapshot ID</div>
+            <div class="detail-value mono">${cfg.snapshotId || '\u2014'}</div>
+          </div>
+          <div class="detail-card span-2">
+            <div class="detail-label">Source Image</div>
+            <div class="detail-value mono">${cfg.image || '\u2014'}</div>
+          </div>
+          <div class="detail-card">
+            <div class="detail-label">Resources</div>
+            <div class="detail-value">${cfg.cpu || 0} vCPU &middot; ${humanSize(cfg.memory || 0)} RAM &middot; ${humanSize(cfg.storage || 0)} Disk</div>
+          </div>
+        ` : ''}
         <div class="detail-card">
           <div class="detail-label">Total Size</div>
           <div class="detail-value">${humanSize(data.totalSize)}</div>
@@ -233,7 +253,7 @@ async function renderTagDetail(el, name, tag) {
             <tbody>
               ${layers.map(l => `
                 <tr>
-                  <td class="cell-name">${l.filename}</td>
+                  <td class="cell-name">${layerTitle(l)}</td>
                   <td class="cell-mono">${shortMediaType(l.mediaType)}</td>
                   <td class="cell-size">${humanSize(l.size)}</td>
                   <td><div class="layer-bar"><div class="layer-bar-fill" style="width:${((l.size || 0) / maxSize * 100).toFixed(1)}%"></div></div></td>
@@ -253,7 +273,7 @@ async function renderTagDetail(el, name, tag) {
             <tbody>
               ${baseImages.map(l => `
                 <tr>
-                  <td class="cell-name">${l.filename}</td>
+                  <td class="cell-name">${layerTitle(l)}</td>
                   <td class="cell-mono">${shortMediaType(l.mediaType)}</td>
                   <td class="cell-size">${humanSize(l.size)}</td>
                   <td class="cell-mono">${shortDigest(l.digest)}</td>

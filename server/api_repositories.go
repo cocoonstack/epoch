@@ -2,6 +2,10 @@ package server
 
 import (
 	"net/http"
+
+	"github.com/projecteru2/core/log"
+
+	"github.com/cocoonstack/epoch/manifest"
 )
 
 // GET /api/stats
@@ -65,7 +69,22 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, tagResponse(t))
+	// For snapshots, fetch the (tiny) config blob and inline its decoded
+	// fields so the UI can render the SnapshotID / Source Image / vCPU /
+	// memory / disk cards without a second round-trip. Failures are logged
+	// and skipped — the rest of the tag detail still renders.
+	var snapshotConfig *manifest.SnapshotConfig
+	if t.Kind == manifest.KindSnapshot.String() {
+		cfg, fetchErr := s.fetchSnapshotConfig(r.Context(), name, t.ManifestJSON)
+		if fetchErr != nil {
+			log.WithFunc("server.apiGetTag").Warnf(r.Context(),
+				"fetch snapshot config for %s:%s: %v", name, tag, fetchErr)
+		} else {
+			snapshotConfig = cfg
+		}
+	}
+
+	writeJSON(w, http.StatusOK, tagResponse(t, snapshotConfig))
 }
 
 // DELETE /api/repositories/{name}/tags/{tag}
