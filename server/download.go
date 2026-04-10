@@ -26,7 +26,7 @@ import (
 // Both flows are auth-exempt by design (vk-cocoon and other consumers can
 // pull without holding a registry token).
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	name := urlVar(r, "name")
 	logger := log.WithFunc("server.handleArtifactDownload")
 
 	raw, err := s.reg.ManifestJSON(r.Context(), name, "latest")

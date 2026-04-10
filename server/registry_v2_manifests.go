@@ -44,8 +44,8 @@ func detectManifestMediaType(data []byte) string {
 // (e.g. `sha256:abc...`). OCI clients commonly resolve a tag to a digest
 // then re-fetch by digest, so both forms must work.
 func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	ref := r.PathValue("reference")
+	name := urlVar(r, "name")
+	ref := urlVar(r, "reference")
 
 	data, err := s.loadManifestRaw(r, name, ref)
 	if err != nil {
@@ -72,8 +72,8 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 // to know the right Content-Type when the underlying object store does not
 // retain it as metadata.
 func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	ref := r.PathValue("reference")
+	name := urlVar(r, "name")
+	ref := urlVar(r, "reference")
 
 	data, err := s.loadManifestRaw(r, name, ref)
 	if err != nil {
@@ -98,8 +98,8 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 // this is the documented way for OCI clients (oras, crane, docker manifest rm)
 // to delete a tag from a registry. Blobs are intentionally left behind for GC.
 func (s *Server) v2DeleteManifest(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	ref := r.PathValue("reference")
+	name := urlVar(r, "name")
+	ref := urlVar(r, "reference")
 	if err := s.reg.DeleteManifest(r.Context(), name, ref); err != nil {
 		if isNotFound(err) {
 			v2Error(w, http.StatusNotFound, "MANIFEST_UNKNOWN", fmt.Sprintf("manifest %s:%s not found", name, ref))
@@ -119,8 +119,8 @@ func (s *Server) v2DeleteManifest(w http.ResponseWriter, r *http.Request) {
 // verbatim and clients re-fetch them unchanged. The registry layer is
 // responsible for the dual tag/digest write.
 func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	ref := r.PathValue("reference")
+	name := urlVar(r, "name")
+	ref := urlVar(r, "reference")
 
 	data, err := io.ReadAll(io.LimitReader(r.Body, manifestBodyLimit))
 	if err != nil {

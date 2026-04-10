@@ -30,7 +30,7 @@ func tagResponse(t *store.Tag) (map[string]any, error) {
 }
 
 func parsePositivePathID(r *http.Request, key string) (int64, error) {
-	id, err := strconv.ParseInt(r.PathValue(key), 10, 64)
+	id, err := strconv.ParseInt(urlVar(r, key), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid id: %w", err)
 	}

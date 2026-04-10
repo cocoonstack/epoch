@@ -2,11 +2,23 @@ package server
 
 import (
 	"errors"
+	"net/http"
 	"strings"
+
+	"github.com/gorilla/mux"
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
 )
+
+// urlVar returns the value of a route variable extracted by gorilla/mux,
+// or the empty string if the variable is not set.
+func urlVar(r *http.Request, name string) string {
+	if v := mux.Vars(r); v != nil {
+		return v[name]
+	}
+	return ""
+}
 
 // defaultManifestMediaType is what HEAD/GET handlers fall back to when an
 // uploaded manifest doesn't carry an explicit `mediaType` field. Standard

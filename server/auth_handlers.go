@@ -19,10 +19,10 @@ import (
 const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
 
 func (s *Server) setupAuthRoutes() {
-	s.mux.HandleFunc("GET /login", s.handleLogin)
-	s.mux.HandleFunc("GET /login/callback", s.handleCallback)
-	s.mux.HandleFunc("GET /logout", s.handleLogout)
-	s.mux.HandleFunc("GET /auth/me", s.handleMe)
+	s.router.HandleFunc("/login", s.handleLogin).Methods(http.MethodGet)
+	s.router.HandleFunc("/login/callback", s.handleCallback).Methods(http.MethodGet)
+	s.router.HandleFunc("/logout", s.handleLogout).Methods(http.MethodGet)
+	s.router.HandleFunc("/auth/me", s.handleMe).Methods(http.MethodGet)
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

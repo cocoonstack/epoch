@@ -23,7 +23,7 @@ const uploadBodyLimit = defaultUploadMaxBytes
 // monolithic upload (POST contains the entire blob). Otherwise a new chunked
 // upload session is started and the client is told where to PATCH.
 func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	name := urlVar(r, "name")
 
 	if digest := r.URL.Query().Get("digest"); digest != "" {
 		s.persistMonolithicUpload(w, r, name, digest)
@@ -40,8 +40,8 @@ func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 // v2PatchBlobUpload handles `PATCH /v2/{name}/blobs/uploads/{uuid}` — append
 // a chunk to an in-progress upload session.
 func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	id := r.PathValue("uuid")
+	name := urlVar(r, "name")
+	id := urlVar(r, "uuid")
 
 	body := io.LimitReader(r.Body, uploadBodyLimit)
 	size, err := s.uploads.Append(id, body)
@@ -62,8 +62,8 @@ func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
 // the blob is persisted. The session is removed on every error path so an
 // abandoned or failed upload does not pin memory.
 func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	id := r.PathValue("uuid")
+	name := urlVar(r, "name")
+	id := urlVar(r, "uuid")
 	digest := r.URL.Query().Get("digest")
 
 	body := io.LimitReader(r.Body, uploadBodyLimit)

@@ -31,7 +31,7 @@ func (s *Server) apiListRepositories(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/repositories/{name}
 func (s *Server) apiGetRepository(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	name := urlVar(r, "name")
 	repo, err := s.store.GetRepository(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -46,7 +46,7 @@ func (s *Server) apiGetRepository(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/repositories/{name}/tags
 func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	name := urlVar(r, "name")
 	tags, err := s.store.ListTags(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -60,8 +60,8 @@ func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/repositories/{name}/tags/{tag}
 func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	tag := r.PathValue("tag")
+	name := urlVar(r, "name")
+	tag := urlVar(r, "tag")
 
 	t, err := s.store.GetTag(r.Context(), name, tag)
 	if err != nil {
@@ -83,8 +83,8 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/repositories/{name}/tags/{tag}
 func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	tag := r.PathValue("tag")
+	name := urlVar(r, "name")
+	tag := urlVar(r, "tag")
 
 	// Delete from object storage (source of truth).
 	if err := s.reg.DeleteManifest(r.Context(), name, tag); err != nil {

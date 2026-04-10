@@ -5,6 +5,11 @@
 //   - /api/ — Control plane API backed by MySQL
 //
 // Static frontend files are embedded and served at /.
+//
+// Routing uses gorilla/mux because Go 1.22+ stdlib net/http.ServeMux's
+// pattern-conflict checks reject the combination of exact-match GET routes
+// (`GET /v2/_catalog`) and method-specific wildcards (`HEAD /v2/{path...}`)
+// that the OCI Distribution shape needs.
 package server
 
 import (
@@ -17,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/registry"
@@ -29,7 +35,7 @@ type Server struct {
 	reg           *registry.Registry
 	store         *store.Store
 	addr          string
-	mux           *http.ServeMux
+	router        *mux.Router
 	sso           *SSOConfig // nil = UI auth disabled
 	registryToken string     // Bearer token for /v2/ (empty = no token required)
 	uploads       *uploadSessions
@@ -53,7 +59,7 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 		reg:           reg,
 		store:         st,
 		addr:          addr,
-		mux:           http.NewServeMux(),
+		router:        mux.NewRouter(),
 		sso:           sso,
 		registryToken: regToken,
 		uploads:       newUploadSessions(),
@@ -93,7 +99,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 	}()
 
-	handler := s.withLogging(s.withCORS(s.withAuth(s.mux)))
+	handler := s.withLogging(s.withCORS(s.withAuth(s.router)))
 	srv := newHTTPServer(ctx, s.addr, handler)
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -104,60 +110,69 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) setupRoutes(ctx context.Context) {
-	// Registry V2 — every method routes through the wildcard dispatcher.
-	//
-	// Go 1.22+ ServeMux flags any exact-match `GET /v2/<x>` as conflicting
-	// with `HEAD /v2/{path...}` because exact-method GET handlers also
-	// implicitly serve HEAD, and the wildcard would otherwise overlap.
-	// Folding `_catalog`, `token`, and the bare `/v2/` ping into the
-	// wildcard dispatcher avoids the conflict and keeps a single routing
-	// surface for the OCI Distribution endpoints.
-	s.mux.HandleFunc("GET /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionManifests: s.v2GetManifest,
-		v2ActionBlobs:     s.v2GetBlob,
-		v2ActionTags:      s.v2TagsList,
-	}))
-	s.mux.HandleFunc("HEAD /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionManifests: s.v2HeadManifest,
-		v2ActionBlobs:     s.v2HeadBlob,
-	}))
-	s.mux.HandleFunc("PUT /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionManifests: s.v2PutManifest,
-		v2ActionBlobs:     s.v2PutBlob,
-		v2ActionUploads:   s.v2CompleteBlobUpload,
-	}))
-	s.mux.HandleFunc("POST /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionUploads: s.v2InitBlobUpload,
-	}))
-	s.mux.HandleFunc("PATCH /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionUploads: s.v2PatchBlobUpload,
-	}))
-	s.mux.HandleFunc("DELETE /v2/{path...}", s.v2Dispatch(map[string]func(http.ResponseWriter, *http.Request){
-		v2ActionManifests: s.v2DeleteManifest,
-	}))
+	// Registry V2 — OCI Distribution endpoints. gorilla/mux's regex segment
+	// patterns make multi-segment repository names like `library/nginx` work
+	// without a hand-rolled dispatcher: `{name:.+}` is greedy across slashes
+	// and the literal segments after it (`/manifests/`, `/blobs/`, `/tags/`)
+	// anchor the match. Routes are registered most-specific first.
+	v2 := s.router.PathPrefix("/v2").Subrouter()
 
-	// Control plane API — fixed paths.
-	s.mux.HandleFunc("GET /api/stats", s.apiStats)
-	s.mux.HandleFunc("GET /api/repositories", s.apiListRepositories)
-	s.mux.HandleFunc("POST /api/catalog/sync", s.apiSync)
-	s.mux.HandleFunc("GET /api/tokens", s.apiListTokens)
-	s.mux.HandleFunc("POST /api/tokens", s.apiCreateToken)
-	s.mux.HandleFunc("DELETE /api/tokens/{id}", s.apiDeleteToken)
+	// OCI Distribution discovery + special endpoints (must come before the
+	// wildcards so the literal segment matches).
+	v2.HandleFunc("/", s.v2Check).Methods(http.MethodGet, http.MethodHead)
+	v2.HandleFunc("", s.v2Check).Methods(http.MethodGet, http.MethodHead)
+	v2.HandleFunc("/_catalog", s.v2Catalog).Methods(http.MethodGet, http.MethodHead)
+	v2.HandleFunc("/token", s.v2Token).Methods(http.MethodGet, http.MethodPost)
 
-	// Control plane API — wildcard dispatch for multi-segment repo names.
-	s.mux.HandleFunc("GET /api/repositories/{path...}", s.apiRepoDispatchGET)
-	s.mux.HandleFunc("DELETE /api/repositories/{path...}", s.apiRepoDispatchDELETE)
+	// Manifests by tag or digest.
+	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2GetManifest).Methods(http.MethodGet)
+	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2HeadManifest).Methods(http.MethodHead)
+	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2PutManifest).Methods(http.MethodPut)
+	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2DeleteManifest).Methods(http.MethodDelete)
 
-	// Public cloud image download (auth-exempt, single canonical path).
-	s.mux.HandleFunc("GET /dl/{name}", s.handleArtifactDownload)
+	// Tags list.
+	v2.HandleFunc("/{name:.+}/tags/list", s.v2TagsList).Methods(http.MethodGet)
 
-	// Frontend — embedded UI.
+	// Blob uploads — POST init / PATCH chunks / PUT complete. The trailing
+	// slash on the init path is required by the OCI spec; clients that omit
+	// it will not match this route.
+	v2.HandleFunc("/{name:.+}/blobs/uploads/", s.v2InitBlobUpload).Methods(http.MethodPost)
+	v2.HandleFunc("/{name:.+}/blobs/uploads/{uuid}", s.v2PatchBlobUpload).Methods(http.MethodPatch)
+	v2.HandleFunc("/{name:.+}/blobs/uploads/{uuid}", s.v2CompleteBlobUpload).Methods(http.MethodPut)
+
+	// Blob get / head / put-by-digest. The {digest} segment includes the
+	// `sha256:` prefix because that is the OCI spec form; handlers strip it
+	// before keying into the object store.
+	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2GetBlob).Methods(http.MethodGet)
+	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2HeadBlob).Methods(http.MethodHead)
+	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2PutBlob).Methods(http.MethodPut)
+
+	// Control plane API.
+	api := s.router.PathPrefix("/api").Subrouter()
+	api.HandleFunc("/stats", s.apiStats).Methods(http.MethodGet)
+	api.HandleFunc("/repositories", s.apiListRepositories).Methods(http.MethodGet)
+	api.HandleFunc("/catalog/sync", s.apiSync).Methods(http.MethodPost)
+	api.HandleFunc("/tokens", s.apiListTokens).Methods(http.MethodGet)
+	api.HandleFunc("/tokens", s.apiCreateToken).Methods(http.MethodPost)
+	api.HandleFunc("/tokens/{id:[0-9]+}", s.apiDeleteToken).Methods(http.MethodDelete)
+
+	// Control plane API — repository routes (multi-segment names).
+	// Most-specific first.
+	api.HandleFunc("/repositories/{name:.+}/tags/{tag}", s.apiGetTag).Methods(http.MethodGet)
+	api.HandleFunc("/repositories/{name:.+}/tags/{tag}", s.apiDeleteTag).Methods(http.MethodDelete)
+	api.HandleFunc("/repositories/{name:.+}/tags", s.apiListTags).Methods(http.MethodGet)
+	api.HandleFunc("/repositories/{name:.+}", s.apiGetRepository).Methods(http.MethodGet)
+
+	// Public artifact download (auth-exempt, single canonical path).
+	s.router.HandleFunc("/dl/{name}", s.handleArtifactDownload).Methods(http.MethodGet)
+
+	// Frontend — embedded UI catches everything else under `/`.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
 		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
 	}
 	s.uiHandler = http.FileServer(http.FS(uiFS))
-	s.mux.Handle("GET /", s.uiHandler)
+	s.router.PathPrefix("/").Handler(s.uiHandler).Methods(http.MethodGet)
 }
 
 func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {

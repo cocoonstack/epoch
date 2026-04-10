@@ -8,7 +8,7 @@ import (
 
 // GET /v2/{name}/blobs/{digest}
 func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
-	dgst := stripSHA256Prefix(r.PathValue("digest"))
+	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 
 	body, size, err := s.reg.StreamBlob(r.Context(), dgst)
 	if err != nil {
@@ -32,7 +32,7 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 
 // HEAD /v2/{name}/blobs/{digest}
 func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
-	dgst := stripSHA256Prefix(r.PathValue("digest"))
+	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 
 	size, err := s.reg.BlobSize(r.Context(), dgst)
 	if err != nil {
@@ -52,7 +52,7 @@ func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 
 // PUT /v2/{name}/blobs/sha256:{digest}
 func (s *Server) v2PutBlob(w http.ResponseWriter, r *http.Request) {
-	dgst := stripSHA256Prefix(r.PathValue("digest"))
+	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 	if dgst == "" {
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID", "missing or invalid digest")
 		return

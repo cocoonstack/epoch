@@ -48,7 +48,7 @@ func (s *Server) v2Catalog(w http.ResponseWriter, r *http.Request) {
 
 // GET /v2/{name}/tags/list
 func (s *Server) v2TagsList(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	name := urlVar(r, "name")
 	tags, err := s.reg.ListTags(r.Context(), name)
 	if err != nil {
 		// Fallback: read tags from catalog.
