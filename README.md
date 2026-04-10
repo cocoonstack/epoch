@@ -146,6 +146,13 @@ make build          # produces ./epoch
 
 ## Configuration
 
+### Server
+
+| Variable | Description |
+|---|---|
+| `EPOCH_LOG_LEVEL` | `debug` / `info` / `warn` / `error` (default `info`) |
+| `EPOCH_PUBLIC_URL` | Absolute base URL clients reach the server at (e.g. `https://epoch.example.com`). Used to anchor the OCI `WWW-Authenticate` realm and `/v2/token`. Optional — when unset epoch reconstructs from the inbound `Host` + `X-Forwarded-Proto`, which works behind nginx but not behind proxies that strip those headers. |
+
 ### Object storage
 
 | Variable | Description |
@@ -165,12 +172,25 @@ make build          # produces ./epoch
 
 - Bearer token from `EPOCH_REGISTRY_TOKEN` or tokens created via the UI
 - Tokens are validated by SHA-256 hash against MySQL
+- When neither is set, `/v2/` writes are open to anonymous clients
 
 **Web UI and control API**:
 
 - Disabled by default (open access)
 - Set `SSO_PROVIDER=google` or `SSO_PROVIDER=oidc` to enable session-based login
 - See [epoch-server.yaml](epoch-server.yaml) for the full list of SSO variables
+
+### CLI client
+
+`epoch push` / `epoch pull` / `epoch get` / `epoch ls` / `epoch inspect` /
+`epoch tag` / `epoch rm` talk to a remote epoch server over HTTP and read
+the following env vars:
+
+| Variable | Description |
+|---|---|
+| `EPOCH_SERVER` | Base URL of the epoch HTTP server (default `http://127.0.0.1:8080`) |
+| `EPOCH_REGISTRY_TOKEN` | Bearer token for write operations; same value as the server-side env |
+| `EPOCH_COCOON_BINARY` | Override the `cocoon` binary path used by `epoch push` / `epoch pull` (default looks up `cocoon` on `$PATH`) |
 
 ### Upload spool
 

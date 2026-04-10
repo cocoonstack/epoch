@@ -61,6 +61,23 @@ spec:
                   name: epoch-storage
                   key: secure
                   optional: true
+            # Disk-backed spool for in-progress chunked OCI uploads. The
+            # default `/var/cache/epoch/uploads` MUST be backed by real disk
+            # — see resolveUploadDir in server/server.go. The emptyDir mount
+            # below provides one; without it the spool falls back to /tmp
+            # (tmpfs in most clusters) and OOMs on multi-GiB pushes.
+            - name: EPOCH_UPLOAD_DIR
+              value: /var/cache/epoch/uploads
+            # Optional: absolute base URL clients reach the server at. Used
+            # to anchor the OCI WWW-Authenticate realm + /v2/token. Required
+            # when fronting epoch with a proxy that does NOT set
+            # X-Forwarded-Proto / X-Forwarded-Host.
+            - name: EPOCH_PUBLIC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: epoch-auth
+                  key: publicURL
+                  optional: true
             - name: EPOCH_REGISTRY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -119,6 +136,16 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+          volumeMounts:
+            - name: upload-spool
+              mountPath: /var/cache/epoch/uploads
+      volumes:
+        # Real-disk emptyDir for the upload spool. Default emptyDir is node
+        # ephemeral storage (real disk), NOT tmpfs — leave `medium` unset.
+        # Sized so a single concurrent multi-GiB OCI push has headroom.
+        - name: upload-spool
+          emptyDir:
+            sizeLimit: 16Gi
 ---
 apiVersion: v1
 kind: Service

@@ -244,6 +244,9 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 		}
 		return err
 	case <-ctx.Done():
+		// Parent ctx is already canceled; deriving from it would yield an
+		// instantly-canceled ctx and skip the drain entirely. Use Background so
+		// srv.Shutdown gets its full 15s window to finish in-flight requests.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {

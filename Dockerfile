@@ -25,6 +25,15 @@ FROM busybox:stable-musl
 COPY --from=runtime-deps /etc/ssl/certs/ /etc/ssl/certs/
 COPY --from=build /out/epoch /usr/bin/epoch
 
+# Pre-create the default upload spool directory so the server's
+# resolveUploadDir picks it up instead of falling back to /tmp (which is
+# tmpfs in most container runtimes and OOMs on multi-GiB pushes). The
+# bundled epoch-server.yaml mounts an emptyDir over this path; standalone
+# `docker run` users can either bind-mount real disk here or accept that
+# the union FS layer carries the spool.
+RUN mkdir -p /var/cache/epoch/uploads
+ENV EPOCH_UPLOAD_DIR=/var/cache/epoch/uploads
+
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/epoch"]
 CMD ["serve"]
