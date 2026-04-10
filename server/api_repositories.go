@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/snapshot"
 )
 
 // GET /api/stats
@@ -58,6 +61,7 @@ func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
+	logger := log.WithFunc("server.apiGetTag")
 
 	t, err := s.store.GetTag(r.Context(), name, tag)
 	if err != nil {
@@ -73,18 +77,34 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 	// fields so the UI can render the SnapshotID / Source Image / vCPU /
 	// memory / disk cards without a second round-trip. Failures are logged
 	// and skipped — the rest of the tag detail still renders.
+	//
+	// The fetch reuses snapshot.FetchSnapshotConfig via the same
+	// registryDownloader adapter that streamSnapshot uses, so the parse +
+	// stream + decode logic lives in exactly one place.
 	var snapshotConfig *manifest.SnapshotConfig
 	if t.Kind == manifest.KindSnapshot.String() {
-		cfg, fetchErr := s.fetchSnapshotConfig(r.Context(), name, t.ManifestJSON)
+		cfg, fetchErr := s.loadSnapshotConfig(r.Context(), name, t.ManifestJSON)
 		if fetchErr != nil {
-			log.WithFunc("server.apiGetTag").Warnf(r.Context(),
-				"fetch snapshot config for %s:%s: %v", name, tag, fetchErr)
+			logger.Warnf(r.Context(), "fetch snapshot config for %s:%s: %v", name, tag, fetchErr)
 		} else {
 			snapshotConfig = cfg
 		}
 	}
 
 	writeJSON(w, http.StatusOK, tagResponse(t, snapshotConfig))
+}
+
+// loadSnapshotConfig parses the cached manifest JSON to find the snapshot
+// config descriptor and delegates the blob fetch + decode to
+// [snapshot.FetchSnapshotConfig], reusing the same registryDownloader adapter
+// that the /dl/{name} streaming path uses.
+func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON string) (*manifest.SnapshotConfig, error) {
+	m, err := manifest.Parse([]byte(manifestJSON))
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	dl := &registryDownloader{reg: s.reg}
+	return snapshot.FetchSnapshotConfig(ctx, dl, name, m.Config)
 }
 
 // DELETE /api/repositories/{name}/tags/{tag}

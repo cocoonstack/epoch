@@ -143,7 +143,7 @@ func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, o
 		localName = opts.Name
 	}
 
-	cfg, err := fetchSnapshotConfig(ctx, dl, opts.Name, m.Config)
+	cfg, err := FetchSnapshotConfig(ctx, dl, opts.Name, m.Config)
 	if err != nil {
 		return fmt.Errorf("fetch snapshot config: %w", err)
 	}
@@ -200,8 +200,15 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 	return bw.Flush()
 }
 
-// fetchSnapshotConfig downloads and parses the snapshot config blob.
-func fetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
+// FetchSnapshotConfig downloads and parses the snapshot config blob referenced
+// by the given descriptor. Exported so the in-process tag-detail API can reuse
+// it via the same Downloader adapter that snapshot.StreamParsed already uses,
+// instead of duplicating the parse/stream/decode dance.
+//
+// Returns an error when desc.MediaType is not [manifest.MediaTypeSnapshotConfig]
+// — that should never happen for a tag the catalog has classified as a
+// snapshot, so callers can treat it as corrupt state and surface it.
+func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
 	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
 		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
 	}

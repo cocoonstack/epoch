@@ -1,23 +1,15 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/store"
 )
-
-// snapshotConfigBlobLimit caps the snapshot config blob read to a sane upper
-// bound. The actual payload is ~200 bytes (a fixed-shape SnapshotConfig
-// struct); 1 MiB is many orders of magnitude above any plausible value but
-// keeps a malicious or corrupted manifest from streaming forever.
-const snapshotConfigBlobLimit = 1 << 20
 
 // tagResponse builds the tag detail payload by passing the manifest bytes
 // through as json.RawMessage — the manifest is already stored as valid JSON
@@ -46,36 +38,6 @@ func tagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[stri
 		resp["snapshotConfig"] = snapshotConfig
 	}
 	return resp
-}
-
-// fetchSnapshotConfig parses the cached manifest JSON to find the snapshot
-// config descriptor, then streams the (tiny) config blob from object storage
-// and decodes it as a [manifest.SnapshotConfig]. Returns (nil, nil) when the
-// manifest's config descriptor is not a snapshot config — that is the normal
-// non-snapshot path, not an error. Real failures (parse, stream, decode) are
-// returned so the caller can decide whether to surface or log-and-skip.
-func (s *Server) fetchSnapshotConfig(ctx context.Context, name, manifestJSON string) (*manifest.SnapshotConfig, error) {
-	m, err := manifest.Parse([]byte(manifestJSON))
-	if err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
-	}
-	if m.Config.MediaType != manifest.MediaTypeSnapshotConfig {
-		return nil, nil
-	}
-	body, _, err := s.reg.StreamBlob(ctx, stripSHA256Prefix(m.Config.Digest))
-	if err != nil {
-		return nil, fmt.Errorf("stream config blob %s for %s: %w", m.Config.Digest, name, err)
-	}
-	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, snapshotConfigBlobLimit))
-	if err != nil {
-		return nil, fmt.Errorf("read config blob %s: %w", m.Config.Digest, err)
-	}
-	var cfg manifest.SnapshotConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("decode snapshot config: %w", err)
-	}
-	return &cfg, nil
 }
 
 func parsePositivePathID(r *http.Request, key string) (int64, error) {
