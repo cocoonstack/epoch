@@ -423,15 +423,26 @@ async function deleteTag(name, tag) {
 
 // --- Tokens View ---
 
+// Hashed at rest, so a freshly-created plaintext token is shown exactly once
+// in a reveal banner. Stash it on the window so renderTokens can pick it up
+// after the post-create re-render, then clear it so a later navigation back
+// to the page does not leak it.
 async function renderTokens(el) {
   el.innerHTML = '<div class="loading"><span class="spinner"></span>Loading</div>';
   try {
     const tokens = await api('/tokens');
+    const reveal = window.__newToken;
+    window.__newToken = null;
     render(el, `
       <div class="page-header">
         <h1 class="page-title" style="margin-bottom:0">Registry Tokens</h1>
         <button class="btn btn-primary" onclick="showCreateToken()">Create Token</button>
       </div>
+      ${reveal ? `
+      <div style="margin-bottom:16px;padding:12px 16px;background:#1f2335;border:1px solid #e0af68;border-radius:8px">
+        <div style="font-size:12px;color:#e0af68;margin-bottom:6px">New token <strong>${reveal.name}</strong> — copy it now, it will not be shown again</div>
+        <code style="display:block;font-size:12px;color:#7aa2f7;user-select:all;word-break:break-all;cursor:pointer;padding:8px;background:#1a1b26;border-radius:4px" onclick="navigator.clipboard.writeText(this.textContent)" title="Click to copy">${reveal.token}</code>
+      </div>` : ''}
       <div id="create-form" style="display:none;margin-bottom:16px">
         <div style="display:flex;gap:8px;align-items:center">
           <input id="token-name" type="text" placeholder="Token name (e.g. vk-cocoon-prod)" style="padding:6px 10px;border:1px solid #333;border-radius:4px;background:#1a1b26;color:#c0caf5;flex:1;font-size:13px">
@@ -446,7 +457,7 @@ async function renderTokens(el) {
           </tr></thead><tbody>
           ${tokens.map(t => `<tr>
             <td><strong>${t.name}</strong></td>
-            <td><code style="font-size:11px;user-select:all;word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)" title="Click to copy">${t.token || '\u2014'}</code></td>
+            <td><code style="font-size:11px;color:#565f89" title="Tokens are hashed at rest and only shown once at creation time">\u2014</code></td>
             <td>${t.createdBy || '\u2014'}</td>
             <td>${timeAgo(t.createdAt)}</td>
             <td>${t.lastUsed ? timeAgo(t.lastUsed) : 'never'}</td>
@@ -480,6 +491,7 @@ async function doCreateToken() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.statusText);
+    window.__newToken = {name: data.name, token: data.token};
     renderTokens($('#app'));
   } catch (e) {
     alert('Create failed: ' + e.message);
