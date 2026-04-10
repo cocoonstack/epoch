@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/cocoonstack/epoch/manifest"
@@ -76,7 +77,7 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 		return nil, err
 	}
 
-	cfg, layers, readErr := p.readAndUploadEntries(ctx, opts.Name, stream, opts.Progress)
+	cfg, files, layers, readErr := p.readAndUploadEntries(ctx, opts.Name, stream, opts.Progress)
 	// Close the read side of the export pipe BEFORE waiting on the
 	// subprocess. If readAndUploadEntries bailed out mid-tar, the cocoon
 	// child is still trying to write to its stdout pipe; closing our read
@@ -95,7 +96,7 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 		return nil, errMissingSnapshotJSON
 	}
 
-	configDescriptor, err := p.uploadSnapshotConfig(ctx, opts.Name, cfg)
+	configDescriptor, err := p.uploadSnapshotConfig(ctx, opts.Name, cfg, files)
 	if err != nil {
 		return nil, fmt.Errorf("upload snapshot config: %w", err)
 	}
@@ -129,10 +130,11 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 
 // readAndUploadEntries walks the cocoon export tar, parsing snapshot.json
 // into cfg and uploading every other entry as a blob descriptor.
-func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Reader, progress func(string)) (*snapshotExportConfig, []manifest.Descriptor, error) {
+func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Reader, progress func(string)) (*snapshotExportConfig, map[string]manifest.SnapshotFile, []manifest.Descriptor, error) {
 	tr := tar.NewReader(r)
 	var (
 		cfg    *snapshotExportConfig
+		files  = map[string]manifest.SnapshotFile{}
 		layers []manifest.Descriptor
 	)
 
@@ -142,13 +144,13 @@ func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Rea
 			break
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("read tar entry: %w", err)
+			return nil, nil, nil, fmt.Errorf("read tar entry: %w", err)
 		}
 
 		if hdr.Name == snapshotJSONName {
 			var envelope snapshotExportEnvelope
 			if decErr := json.NewDecoder(tr).Decode(&envelope); decErr != nil {
-				return nil, nil, fmt.Errorf("parse snapshot.json: %w", decErr)
+				return nil, nil, nil, fmt.Errorf("parse snapshot.json: %w", decErr)
 			}
 			cfg = &envelope.Config
 			continue
@@ -164,29 +166,30 @@ func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Rea
 			continue
 		}
 		if hdr.Size < 0 {
-			return nil, nil, fmt.Errorf("tar entry %s has negative size %d", hdr.Name, hdr.Size)
+			return nil, nil, nil, fmt.Errorf("tar entry %s has negative size %d", hdr.Name, hdr.Size)
 		}
 
-		desc, uploadErr := p.uploadTarEntry(ctx, name, hdr, tr)
+		desc, fileMeta, uploadErr := p.uploadTarEntry(ctx, name, hdr, tr)
 		if uploadErr != nil {
-			return nil, nil, fmt.Errorf("upload %s: %w", hdr.Name, uploadErr)
+			return nil, nil, nil, fmt.Errorf("upload %s: %w", hdr.Name, uploadErr)
 		}
+		files[hdr.Name] = fileMeta
 		layers = append(layers, desc)
 		if progress != nil {
 			progress(fmt.Sprintf("  %s -> %s (%d bytes)", hdr.Name, desc.Digest, desc.Size))
 		}
 	}
 
-	return cfg, layers, nil
+	return cfg, files, layers, nil
 }
 
 // uploadTarEntry spools a single tar entry to a temp file while hashing,
 // then uploads it via the registry's blob endpoint with dedup. The returned
 // descriptor is what goes into the OCI manifest's `layers` array.
-func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Header, body io.Reader) (manifest.Descriptor, error) {
+func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Header, body io.Reader) (manifest.Descriptor, manifest.SnapshotFile, error) {
 	tmp, err := os.CreateTemp("", "epoch-snapshot-*")
 	if err != nil {
-		return manifest.Descriptor{}, fmt.Errorf("create temp: %w", err)
+		return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("create temp: %w", err)
 	}
 	defer func() {
 		_ = tmp.Close()
@@ -196,7 +199,7 @@ func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Heade
 	h := sha256.New()
 	written, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(body, hdr.Size))
 	if err != nil {
-		return manifest.Descriptor{}, fmt.Errorf("buffer entry: %w", err)
+		return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("buffer entry: %w", err)
 	}
 
 	digestHex := hex.EncodeToString(h.Sum(nil))
@@ -204,15 +207,30 @@ func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Heade
 
 	exists, existsErr := p.Uploader.BlobExists(ctx, name, digest)
 	if existsErr != nil {
-		return manifest.Descriptor{}, fmt.Errorf("check blob %s: %w", digest, existsErr)
+		return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("check blob %s: %w", digest, existsErr)
 	}
 	if !exists {
 		if _, seekErr := tmp.Seek(0, io.SeekStart); seekErr != nil {
-			return manifest.Descriptor{}, fmt.Errorf("seek temp: %w", seekErr)
+			return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("seek temp: %w", seekErr)
 		}
 		if err := p.Uploader.PutBlob(ctx, name, digest, tmp, written); err != nil {
-			return manifest.Descriptor{}, err
+			return manifest.Descriptor{}, manifest.SnapshotFile{}, err
 		}
+	}
+
+	fileMeta := manifest.SnapshotFile{Mode: hdr.Mode}
+	sparseMap, ok := hdr.PAXRecords[sparsePAXMap]
+	if ok {
+		fileMeta.SparseMap = sparseMap
+		rawSize, ok := hdr.PAXRecords[sparsePAXSize]
+		if !ok {
+			return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("sparse entry %s missing %s", hdr.Name, sparsePAXSize)
+		}
+		sparseSize, parseErr := strconv.ParseInt(rawSize, 10, 64)
+		if parseErr != nil {
+			return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("parse sparse size for %s: %w", hdr.Name, parseErr)
+		}
+		fileMeta.SparseSize = sparseSize
 	}
 
 	return manifest.Descriptor{
@@ -220,21 +238,27 @@ func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Heade
 		Digest:      digest,
 		Size:        written,
 		Annotations: map[string]string{manifest.AnnotationTitle: hdr.Name},
-	}, nil
+	}, fileMeta, nil
 }
 
 // uploadSnapshotConfig builds the snapshot config blob from the cocoon
 // envelope and uploads it. Returns a descriptor suitable for the manifest's
 // `config` field.
-func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *snapshotExportConfig) (manifest.Descriptor, error) {
+func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *snapshotExportConfig, files map[string]manifest.SnapshotFile) (manifest.Descriptor, error) {
 	cfgBlob := manifest.SnapshotConfig{
 		SchemaVersion: "v1",
 		SnapshotID:    cfg.ID,
+		Description:   cfg.Description,
 		Image:         cfg.Image,
+		ImageBlobIDs:  cfg.ImageBlobIDs,
+		Hypervisor:    cfg.Hypervisor,
 		CPU:           cfg.CPU,
 		Memory:        cfg.Memory,
 		Storage:       cfg.Storage,
 		NICs:          cfg.NICs,
+		Network:       cfg.Network,
+		Windows:       cfg.Windows,
+		Files:         files,
 		CreatedAt:     nowFunc().UTC(),
 	}
 	data, err := json.Marshal(cfgBlob)

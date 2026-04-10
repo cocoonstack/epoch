@@ -37,6 +37,11 @@ const (
 	// `cocoon snapshot export`. It carries the cocoon snapshot envelope
 	// metadata that we translate into the OCI manifest config blob.
 	snapshotJSONName = "snapshot.json"
+
+	// cocoon writes sparse files in export tar streams using custom PAX keys.
+	// epoch preserves them in the config blob and restores them on pull.
+	sparsePAXMap  = "COCOON.sparse.map"
+	sparsePAXSize = "COCOON.sparse.size"
 )
 
 // errMissingSnapshotJSON is returned by Pusher.Push when the cocoon export
@@ -182,11 +187,16 @@ type snapshotExportEnvelope struct {
 
 // snapshotExportConfig mirrors cocoon's `types.SnapshotConfig`.
 type snapshotExportConfig struct {
-	ID      string `json:"id,omitempty"`
-	Name    string `json:"name"`
-	Image   string `json:"image,omitempty"`
-	CPU     int    `json:"cpu,omitempty"`
-	Memory  int64  `json:"memory,omitempty"`
-	Storage int64  `json:"storage,omitempty"`
-	NICs    int    `json:"nics,omitempty"`
+	ID           string              `json:"id,omitempty"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description,omitempty"`
+	Image        string              `json:"image,omitempty"`
+	ImageBlobIDs map[string]struct{} `json:"image_blob_ids,omitempty"`
+	Hypervisor   string              `json:"hypervisor,omitempty"`
+	CPU          int                 `json:"cpu,omitempty"`
+	Memory       int64               `json:"memory,omitempty"`
+	Storage      int64               `json:"storage,omitempty"`
+	NICs         int                 `json:"nics,omitempty"`
+	Network      string              `json:"network,omitempty"`
+	Windows      bool                `json:"windows,omitempty"`
 }

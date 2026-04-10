@@ -101,9 +101,24 @@ type nopWriteCloser struct{ w io.Writer }
 func (n *nopWriteCloser) Write(p []byte) (int, error) { return n.w.Write(p) }
 func (n *nopWriteCloser) Close() error                { return nil }
 
+type exportTarEntry struct {
+	data []byte
+	mode int64
+	pax  map[string]string
+}
+
 // buildExportTar produces a fake `cocoon snapshot export` tar containing a
 // snapshot.json envelope plus the named files.
 func buildExportTar(t *testing.T, cfg snapshotExportConfig, files map[string][]byte) []byte {
+	t.Helper()
+	entries := make(map[string]exportTarEntry, len(files))
+	for name, data := range files {
+		entries[name] = exportTarEntry{data: data, mode: 0o640}
+	}
+	return buildExportTarEntries(t, cfg, entries)
+}
+
+func buildExportTarEntries(t *testing.T, cfg snapshotExportConfig, files map[string]exportTarEntry) []byte {
 	t.Helper()
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
@@ -121,15 +136,20 @@ func buildExportTar(t *testing.T, cfg snapshotExportConfig, files map[string][]b
 	}
 
 	// Stable order so the layer order in the produced manifest is testable.
-	for _, name := range []string{"config.json", "state.json", "memory-ranges", "overlay.qcow2"} {
-		data, ok := files[name]
+	for _, name := range []string{"config.json", "state.json", "memory-ranges", "overlay.qcow2", "cidata.img"} {
+		entry, ok := files[name]
 		if !ok {
 			continue
 		}
-		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(data)), Mode: 0o640}); err != nil {
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o640
+		}
+		hdr := &tar.Header{Name: name, Size: int64(len(entry.data)), Mode: mode, PAXRecords: entry.pax}
+		if err := tw.WriteHeader(hdr); err != nil {
 			t.Fatalf("write %s header: %v", name, err)
 		}
-		if _, err := tw.Write(data); err != nil {
+		if _, err := tw.Write(entry.data); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
@@ -147,20 +167,25 @@ func TestPushProducesOCISnapshotManifest(t *testing.T) {
 		"overlay.qcow2": []byte("qcow2 bytes"),
 	}
 	cfg := snapshotExportConfig{
-		ID:      "snap-id-1",
-		Name:    "myvm",
-		Image:   "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
-		CPU:     4,
-		Memory:  1 << 30,
-		Storage: 10 << 30,
-		NICs:    1,
+		ID:           "snap-id-1",
+		Name:         "myvm",
+		Description:  "snapshot desc",
+		Image:        "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
+		ImageBlobIDs: map[string]struct{}{"blob-a": {}},
+		Hypervisor:   "cloud-hypervisor",
+		CPU:          4,
+		Memory:       1 << 30,
+		Storage:      10 << 30,
+		NICs:         1,
+		Network:      "dnsmasq-dhcp",
+		Windows:      true,
 	}
 
 	uploader := newFakeUploader()
 	cocoon := &fakeCocoon{exportTar: buildExportTar(t, cfg, files)}
 	pusher := &Pusher{Uploader: uploader, Cocoon: cocoon}
 
-	result, err := pusher.Push(context.Background(), PushOptions{
+	result, err := pusher.Push(t.Context(), PushOptions{
 		Name:      "myvm",
 		Tag:       "v1",
 		BaseImage: "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
@@ -238,6 +263,12 @@ func TestPushProducesOCISnapshotManifest(t *testing.T) {
 	if snapCfg.SnapshotID != "snap-id-1" || snapCfg.CPU != 4 || snapCfg.Memory != 1<<30 {
 		t.Errorf("config blob mismatch: %+v", snapCfg)
 	}
+	if snapCfg.Description != "snapshot desc" || snapCfg.Hypervisor != "cloud-hypervisor" || snapCfg.Network != "dnsmasq-dhcp" || !snapCfg.Windows {
+		t.Errorf("config blob missing extended snapshot metadata: %+v", snapCfg)
+	}
+	if _, ok := snapCfg.ImageBlobIDs["blob-a"]; !ok {
+		t.Errorf("config blob missing image blob IDs: %+v", snapCfg.ImageBlobIDs)
+	}
 }
 
 func TestPushOmitsBaseImageAnnotationWhenEmpty(t *testing.T) {
@@ -247,7 +278,7 @@ func TestPushOmitsBaseImageAnnotationWhenEmpty(t *testing.T) {
 	uploader := newFakeUploader()
 	pusher := &Pusher{Uploader: uploader, Cocoon: cocoon}
 
-	if _, err := pusher.Push(context.Background(), PushOptions{Name: "myvm"}); err != nil {
+	if _, err := pusher.Push(t.Context(), PushOptions{Name: "myvm"}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -268,25 +299,29 @@ func TestPullReassemblesTarFromOCISnapshot(t *testing.T) {
 		"overlay.qcow2": []byte("qcow-bytes"),
 	}
 	cfg := snapshotExportConfig{
-		ID:     "snap-id-1",
-		Name:   "myvm",
-		Image:  "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
-		CPU:    2,
-		Memory: 1 << 30,
-		NICs:   1,
+		ID:           "snap-id-1",
+		Name:         "myvm",
+		Description:  "restored desc",
+		Image:        "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
+		ImageBlobIDs: map[string]struct{}{"blob-b": {}},
+		Hypervisor:   "cloud-hypervisor",
+		CPU:          2,
+		Memory:       1 << 30,
+		NICs:         1,
+		Network:      "dnsmasq-dhcp",
 	}
 
 	uploader := newFakeUploader()
 	cocoon := &fakeCocoon{exportTar: buildExportTar(t, cfg, files)}
 	pusher := &Pusher{Uploader: uploader, Cocoon: cocoon}
-	if _, err := pusher.Push(context.Background(), PushOptions{Name: "myvm", Tag: "v1"}); err != nil {
+	if _, err := pusher.Push(t.Context(), PushOptions{Name: "myvm", Tag: "v1"}); err != nil {
 		t.Fatalf("seed push: %v", err)
 	}
 
 	pullCocoon := &fakeCocoon{}
 	puller := &Puller{Downloader: uploader, Cocoon: pullCocoon}
 
-	if err := puller.Pull(context.Background(), PullOptions{Name: "myvm", Tag: "v1", LocalName: "myvm-restored"}); err != nil {
+	if err := puller.Pull(t.Context(), PullOptions{Name: "myvm", Tag: "v1", LocalName: "myvm-restored"}); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 
@@ -329,6 +364,12 @@ func TestPullReassemblesTarFromOCISnapshot(t *testing.T) {
 	if gotEnvelope.Config.ID != "snap-id-1" || gotEnvelope.Config.CPU != 2 {
 		t.Errorf("envelope config mismatch: %+v", gotEnvelope.Config)
 	}
+	if gotEnvelope.Config.Description != "restored desc" || gotEnvelope.Config.Hypervisor != "cloud-hypervisor" || gotEnvelope.Config.Network != "dnsmasq-dhcp" {
+		t.Errorf("envelope extended metadata mismatch: %+v", gotEnvelope.Config)
+	}
+	if _, ok := gotEnvelope.Config.ImageBlobIDs["blob-b"]; !ok {
+		t.Errorf("envelope image blob IDs missing: %+v", gotEnvelope.Config.ImageBlobIDs)
+	}
 
 	for name, want := range files {
 		if got, ok := gotFiles[name]; !ok {
@@ -337,6 +378,69 @@ func TestPullReassemblesTarFromOCISnapshot(t *testing.T) {
 			t.Errorf("import stream %s = %q, want %q", name, got, want)
 		}
 	}
+}
+
+func TestPullPreservesSparseTarMetadata(t *testing.T) {
+	sparseMap := `[{"o":0,"l":4},{"o":12,"l":4}]`
+	entries := map[string]exportTarEntry{
+		"config.json": {data: []byte(`{"cpu":2}`), mode: 0o640},
+		"memory-ranges": {
+			data: []byte("ABCDWXYZ"),
+			mode: 0o640,
+			pax: map[string]string{
+				sparsePAXMap:  sparseMap,
+				sparsePAXSize: "16",
+			},
+		},
+	}
+	cfg := snapshotExportConfig{
+		ID:         "snap-id-sparse",
+		Name:       "mysparse",
+		Hypervisor: "cloud-hypervisor",
+	}
+
+	uploader := newFakeUploader()
+	cocoon := &fakeCocoon{exportTar: buildExportTarEntries(t, cfg, entries)}
+	pusher := &Pusher{Uploader: uploader, Cocoon: cocoon}
+	if _, err := pusher.Push(t.Context(), PushOptions{Name: "mysparse", Tag: "latest"}); err != nil {
+		t.Fatalf("seed push: %v", err)
+	}
+
+	pullCocoon := &fakeCocoon{}
+	puller := &Puller{Downloader: uploader, Cocoon: pullCocoon}
+	if err := puller.Pull(t.Context(), PullOptions{Name: "mysparse", Tag: "latest", LocalName: "mysparse-restored"}); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	tr := tar.NewReader(&pullCocoon.importPayload)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read tar: %v", err)
+		}
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatalf("read tar body: %v", err)
+		}
+		if hdr.Name != "memory-ranges" {
+			continue
+		}
+		if got := hdr.PAXRecords[sparsePAXMap]; got != sparseMap {
+			t.Fatalf("sparse map = %q, want %q", got, sparseMap)
+		}
+		if got := hdr.PAXRecords[sparsePAXSize]; got != "16" {
+			t.Fatalf("sparse size = %q, want 16", got)
+		}
+		if !bytes.Equal(body, []byte("ABCDWXYZ")) {
+			t.Fatalf("sparse body = %q, want ABCDWXYZ", body)
+		}
+		return
+	}
+
+	t.Fatal("memory-ranges entry not found")
 }
 
 func TestPullRejectsNonSnapshotManifest(t *testing.T) {
@@ -353,7 +457,7 @@ func TestPullRejectsNonSnapshotManifest(t *testing.T) {
 	}
 
 	puller := &Puller{Downloader: uploader, Cocoon: &fakeCocoon{}}
-	err := puller.Pull(context.Background(), PullOptions{Name: "foo", Tag: "latest"})
+	err := puller.Pull(t.Context(), PullOptions{Name: "foo", Tag: "latest"})
 	if err == nil {
 		t.Fatal("expected error pulling container manifest as snapshot")
 	}
@@ -364,7 +468,7 @@ func TestPullRejectsNonSnapshotManifest(t *testing.T) {
 
 func TestPushRequiresName(t *testing.T) {
 	pusher := &Pusher{Uploader: newFakeUploader(), Cocoon: &fakeCocoon{}}
-	_, err := pusher.Push(context.Background(), PushOptions{})
+	_, err := pusher.Push(t.Context(), PushOptions{})
 	if err == nil {
 		t.Fatal("expected error when name is empty")
 	}

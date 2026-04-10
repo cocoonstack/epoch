@@ -181,18 +181,31 @@ func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
 // OCI manifest's `config` descriptor. Wire mediaType: [MediaTypeSnapshotConfig].
 //
 // The config blob captures the cocoon VM metadata that is too structured for
-// annotations (numeric resource values, base image hex IDs). It is written as
-// a single content-addressable blob and referenced from the manifest like any
-// other OCI config.
+// annotations (numeric resource values, base image hex IDs, sparse-file
+// metadata). It is written as a single content-addressable blob and referenced
+// from the manifest like any other OCI config.
+type SnapshotFile struct {
+	Mode       int64  `json:"mode,omitempty"`
+	SparseMap  string `json:"sparseMap,omitempty"`
+	SparseSize int64  `json:"sparseSize,omitempty"`
+}
+
+// SnapshotConfig is the per-snapshot metadata stored in the OCI config blob.
 type SnapshotConfig struct {
-	SchemaVersion string    `json:"schemaVersion"`
-	SnapshotID    string    `json:"snapshotId"`
-	Image         string    `json:"image,omitempty"`
-	CPU           int       `json:"cpu,omitempty"`
-	Memory        int64     `json:"memory,omitempty"`
-	Storage       int64     `json:"storage,omitempty"`
-	NICs          int       `json:"nics,omitempty"`
-	CreatedAt     time.Time `json:"createdAt"`
+	SchemaVersion string                  `json:"schemaVersion"`
+	SnapshotID    string                  `json:"snapshotId"`
+	Description   string                  `json:"description,omitempty"`
+	Image         string                  `json:"image,omitempty"`
+	ImageBlobIDs  map[string]struct{}     `json:"imageBlobIds,omitempty"`
+	Hypervisor    string                  `json:"hypervisor,omitempty"`
+	CPU           int                     `json:"cpu,omitempty"`
+	Memory        int64                   `json:"memory,omitempty"`
+	Storage       int64                   `json:"storage,omitempty"`
+	NICs          int                     `json:"nics,omitempty"`
+	Network       string                  `json:"network,omitempty"`
+	Windows       bool                    `json:"windows,omitempty"`
+	Files         map[string]SnapshotFile `json:"files,omitempty"`
+	CreatedAt     time.Time               `json:"createdAt"`
 }
 
 // Catalog is epoch's global index of repositories under `epoch/catalog.json`.

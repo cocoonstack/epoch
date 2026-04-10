@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/cocoonstack/epoch/manifest"
@@ -162,13 +163,18 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 	envelope := snapshotExportEnvelope{
 		Version: 1,
 		Config: snapshotExportConfig{
-			ID:      cfg.SnapshotID,
-			Name:    localName,
-			Image:   cfg.Image,
-			CPU:     cfg.CPU,
-			Memory:  cfg.Memory,
-			Storage: cfg.Storage,
-			NICs:    cfg.NICs,
+			ID:           cfg.SnapshotID,
+			Name:         localName,
+			Description:  cfg.Description,
+			Image:        cfg.Image,
+			ImageBlobIDs: cfg.ImageBlobIDs,
+			Hypervisor:   cfg.Hypervisor,
+			CPU:          cfg.CPU,
+			Memory:       cfg.Memory,
+			Storage:      cfg.Storage,
+			NICs:         cfg.NICs,
+			Network:      cfg.Network,
+			Windows:      cfg.Windows,
 		},
 	}
 	envelopeJSON, err := json.MarshalIndent(envelope, "", "  ")
@@ -189,7 +195,11 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 		if progress != nil {
 			progress(fmt.Sprintf("  %s (%d bytes)", title, layer.Size))
 		}
-		if err := streamLayerToTar(ctx, dl, name, layer, tw, now); err != nil {
+		var fileMeta manifest.SnapshotFile
+		if cfg.Files != nil {
+			fileMeta = cfg.Files[title]
+		}
+		if err := streamLayerToTar(ctx, dl, name, layer, fileMeta, tw, now); err != nil {
 			return err
 		}
 	}
@@ -233,13 +243,27 @@ func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 // header advertises layer.Size, so the body MUST match exactly: too few
 // bytes corrupts the tar stream cocoon reads, too many means the registry
 // served the wrong blob.
-func streamLayerToTar(ctx context.Context, dl Downloader, name string, layer manifest.Descriptor, tw *tar.Writer, modTime time.Time) error {
-	if err := tw.WriteHeader(&tar.Header{
+func streamLayerToTar(ctx context.Context, dl Downloader, name string, layer manifest.Descriptor, fileMeta manifest.SnapshotFile, tw *tar.Writer, modTime time.Time) error {
+	mode := fileMeta.Mode
+	if mode == 0 {
+		mode = 0o640
+	}
+	hdr := &tar.Header{
 		Name:    layer.Title(),
 		Size:    layer.Size,
-		Mode:    0o640,
+		Mode:    mode,
 		ModTime: modTime,
-	}); err != nil {
+	}
+	if fileMeta.SparseMap != "" {
+		if fileMeta.SparseSize <= 0 {
+			return fmt.Errorf("layer %s has sparse map without sparse size", layer.Digest)
+		}
+		hdr.PAXRecords = map[string]string{
+			sparsePAXMap:  fileMeta.SparseMap,
+			sparsePAXSize: strconv.FormatInt(fileMeta.SparseSize, 10),
+		}
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
 		return fmt.Errorf("write tar header: %w", err)
 	}
 	body, err := dl.GetBlob(ctx, name, layer.Digest)
