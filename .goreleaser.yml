@@ -19,17 +19,19 @@ builds:
       - amd64
     main: .
 
-  - id: epoch-linux
+  - id: epoch-release
     binary: epoch
     env:
       - CGO_ENABLED=0
     ldflags:
       - -s
+      - -w
       - -X github.com/cocoonstack/epoch/version.Revision={{.Commit}}
       - -X github.com/cocoonstack/epoch/version.Version={{.Env.VERSION}}
       - -X github.com/cocoonstack/epoch/version.BuiltAt={{.Date}}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
@@ -38,7 +40,7 @@ builds:
 archives:
   - id: release
     builds:
-      - epoch-linux
+      - epoch-release
     name_template: >-
       {{- .ProjectName }}_{{- .Version }}_
       {{- title .Os }}_

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultBaseURL    = "http://127.0.0.1:4300"
+	defaultBaseURL    = "http://127.0.0.1:8080"
 	maxErrorBodyBytes = 512
 )
 
@@ -31,7 +31,7 @@ type Client struct {
 }
 
 // New creates a client for the given base URL and bearer token. Empty baseURL
-// falls back to http://127.0.0.1:4300. The TLS config skips verification
+// falls back to http://127.0.0.1:8080. The TLS config skips verification
 // because epoch is commonly deployed behind a self-signed cert in dev.
 func New(baseURL, token string) *Client {
 	baseURL = strings.TrimSpace(baseURL)

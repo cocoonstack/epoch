@@ -109,23 +109,31 @@ disk layers (`vnd.cocoonstack.disk.qcow2[.part]` / `vnd.cocoonstack.disk.raw[.pa
 
 ### Download
 
-Download a pre-built binary from [GitHub Releases](https://github.com/cocoonstack/epoch/releases):
+Grab a release tarball from [GitHub Releases](https://github.com/cocoonstack/epoch/releases).
+Set `VERSION` to the release you want (the archive filename embeds it):
 
 ```bash
+VERSION=0.1.6   # pick the latest release tag from the Releases page
+
 # Linux (amd64)
-curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-linux-amd64
-chmod +x epoch
-sudo mv epoch /usr/local/bin/
+curl -fSL https://github.com/cocoonstack/epoch/releases/download/v${VERSION}/epoch_${VERSION}_Linux_x86_64.tar.gz \
+  | tar -xzf - epoch
+sudo install -m 0755 epoch /usr/local/bin/epoch && rm epoch
 
 # Linux (arm64)
-curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-linux-arm64
-chmod +x epoch
-sudo mv epoch /usr/local/bin/
+curl -fSL https://github.com/cocoonstack/epoch/releases/download/v${VERSION}/epoch_${VERSION}_Linux_arm64.tar.gz \
+  | tar -xzf - epoch
+sudo install -m 0755 epoch /usr/local/bin/epoch && rm epoch
 
 # macOS (Apple Silicon)
-curl -fSL -o epoch https://github.com/cocoonstack/epoch/releases/latest/download/epoch-darwin-arm64
-chmod +x epoch
-sudo mv epoch /usr/local/bin/
+curl -fSL https://github.com/cocoonstack/epoch/releases/download/v${VERSION}/epoch_${VERSION}_Darwin_arm64.tar.gz \
+  | tar -xzf - epoch
+sudo install -m 0755 epoch /usr/local/bin/epoch && rm epoch
+
+# macOS (Intel)
+curl -fSL https://github.com/cocoonstack/epoch/releases/download/v${VERSION}/epoch_${VERSION}_Darwin_x86_64.tar.gz \
+  | tar -xzf - epoch
+sudo install -m 0755 epoch /usr/local/bin/epoch && rm epoch
 ```
 
 ### Build from source
@@ -196,7 +204,7 @@ export EPOCH_S3_SECRET_KEY=changeme
 export EPOCH_S3_BUCKET=epoch
 export EPOCH_S3_SECURE=false
 
-./epoch serve --addr :4300 --dsn 'epoch:epoch@tcp(127.0.0.1:3306)/epoch?parseTime=true'
+./epoch serve --addr :8080 --dsn 'epoch:epoch@tcp(127.0.0.1:3306)/epoch?parseTime=true'
 ```
 
 ## CLI

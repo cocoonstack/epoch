@@ -24,7 +24,7 @@ func newServeCmd() *cobra.Command {
   - /    — Web UI for browsing repositories and tags
 
 Requires a MySQL database. Start one with:
-  cd deploy && docker compose up -d`,
+  docker compose up -d mysql`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 

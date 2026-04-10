@@ -19,7 +19,7 @@ cocoonstack artifacts side by side:
   - OCI cloud images       — disk-only artifacts, e.g. ghcr.io/cocoonstack/windows/win11:25h2
   - OCI VM snapshots       — cocoon snapshots packaged as OCI artifacts
 
-CLI commands talk to the Epoch HTTP server (default http://127.0.0.1:4300).
+CLI commands talk to the Epoch HTTP server (default http://127.0.0.1:8080).
 Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 		SilenceUsage: true,
 	}

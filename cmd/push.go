@@ -25,7 +25,7 @@ application/vnd.cocoonstack.snapshot.v1+json.
 
 The cocoon binary must be available on $PATH (override with $EPOCH_COCOON_BINARY).
 
-Requires EPOCH_SERVER (default http://127.0.0.1:4300) and EPOCH_REGISTRY_TOKEN
+Requires EPOCH_SERVER (default http://127.0.0.1:8080) and EPOCH_REGISTRY_TOKEN
 environment variables.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

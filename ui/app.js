@@ -378,7 +378,7 @@ async function renderTokens(el) {
       }
       <div style="margin-top:24px;padding:16px;background:#1a1b26;border-radius:8px;border:1px solid #292e42">
         <div style="font-size:12px;color:#565f89;margin-bottom:8px">Usage</div>
-        <code style="color:#7aa2f7;font-size:12px">curl -H "Authorization: Bearer &lt;token&gt;" http://epoch:4300/v2/_catalog</code>
+        <code style="color:#7aa2f7;font-size:12px">curl -H "Authorization: Bearer &lt;token&gt;" http://epoch:8080/v2/_catalog</code>
       </div>
     `);
   } catch (e) {
