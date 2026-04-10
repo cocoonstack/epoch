@@ -65,19 +65,6 @@ func NewFromEnv() (*Registry, error) {
 	return New(client), nil
 }
 
-// NewFromConfigMap creates a registry using object store credentials from a k8s ConfigMap.
-func NewFromConfigMap(namespace, configmap string) (*Registry, error) {
-	cfg, err := objectstore.ConfigFromConfigMap(namespace, configmap, "epoch/")
-	if err != nil {
-		return nil, err
-	}
-	client, err := objectstore.New(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return New(client), nil
-}
-
 // --- Blob operations ---
 
 // PushBlobFromStream uploads a blob whose digest the caller has already

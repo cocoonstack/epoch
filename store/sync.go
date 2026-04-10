@@ -50,6 +50,9 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	defer func() { _ = tx.Rollback() }()
 
 	for repoName, repo := range cat.Repositories {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		repoID, err := upsertRepositoryTx(ctx, tx, repoName)
 		if err != nil {
 			logger.Warnf(ctx, "upsert repo %s: %v", repoName, err)
@@ -74,9 +77,11 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 // syncTag fetches a single manifest from the registry, parses it, and writes
 // the tag + its blob descriptors into the SQL transaction.
 func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry, repoID int64, repoName, tagName string) error {
+	logger := log.WithFunc("store.syncTag")
+
 	existing, dbErr := s.getTagDigest(ctx, repoID, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
-		log.WithFunc("store.syncTag").Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
+		logger.Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
 	}
 
 	raw, err := reg.ManifestJSON(ctx, repoName, tagName)
@@ -114,7 +119,7 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 
 	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
 	if err := batchUpsertBlobsTx(ctx, tx, descriptors); err != nil {
-		log.WithFunc("store.syncTag").Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
+		logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
 	}
 	return nil
 }

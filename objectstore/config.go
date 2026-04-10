@@ -1,12 +1,10 @@
 package objectstore
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,51 +50,6 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
 		return nil, errors.New("epoch s3 endpoint, access key, and bucket are required")
-	}
-
-	normalizedEndpoint, secure, err := normalizeEndpoint(endpoint, secureRaw)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Config{
-		Endpoint:  normalizedEndpoint,
-		AccessKey: accessKey,
-		SecretKey: secretKey,
-		Bucket:    bucket,
-		Region:    region,
-		Prefix:    prefixValue,
-		Secure:    secure,
-	}, nil
-}
-
-// ConfigFromConfigMap reads S3-compatible storage settings from a Kubernetes ConfigMap.
-// Uses kubectl subprocess because this function runs in contexts where a full k8s
-// client-go dependency would be too heavy (CLI tools, pullers). The ConfigMap is read
-// once at startup, so the subprocess overhead is negligible.
-func ConfigFromConfigMap(namespace, name, prefix string) (*Config, error) {
-	out, err := exec.Command("kubectl", "get", "configmap", name, "-n", namespace, "-o", "json").Output() //nolint:gosec // trusted args from caller
-	if err != nil {
-		return nil, fmt.Errorf("kubectl get configmap %s -n %s: %w", name, namespace, err)
-	}
-
-	var cm struct {
-		Data map[string]string `json:"data"`
-	}
-	if unmarshalErr := json.Unmarshal(out, &cm); unmarshalErr != nil {
-		return nil, fmt.Errorf("parse configmap: %w", unmarshalErr)
-	}
-
-	endpoint := cm.Data["EPOCH_S3_ENDPOINT"]
-	accessKey := cm.Data["EPOCH_S3_ACCESS_KEY"]
-	secretKey := cm.Data["EPOCH_S3_SECRET_KEY"]
-	bucket := cm.Data["EPOCH_S3_BUCKET"]
-	region := cm.Data["EPOCH_S3_REGION"]
-	secureRaw := cm.Data["EPOCH_S3_SECURE"]
-	prefixValue := utils.FirstNonEmpty(cm.Data["EPOCH_S3_PREFIX"], prefix)
-
-	if endpoint == "" || accessKey == "" || bucket == "" {
-		return nil, fmt.Errorf("configmap %s/%s missing s3 endpoint, access key, or bucket", namespace, name)
 	}
 
 	normalizedEndpoint, secure, err := normalizeEndpoint(endpoint, secureRaw)

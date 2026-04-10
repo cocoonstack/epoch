@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/projecteru2/core/log"
 	"github.com/projecteru2/core/types"
@@ -17,5 +19,7 @@ func main() {
 	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: logLevel}, ""); err != nil {
 		log.WithFunc("main.main").Fatalf(ctx, err, "setup log: %v", err)
 	}
-	cmd.Execute()
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	cmd.Execute(ctx)
 }

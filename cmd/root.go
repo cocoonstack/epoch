@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -37,9 +38,11 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 	return root
 }
 
-// Execute runs the root command.
-func Execute() {
-	if err := NewRootCmd().Execute(); err != nil {
+// Execute runs the root command with the given context. The context is
+// propagated to every subcommand via cobra.Command.Context(), so SIGINT /
+// SIGTERM cancellation reaches the long-running serve handler.
+func Execute(ctx context.Context) {
+	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
