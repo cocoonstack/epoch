@@ -82,7 +82,7 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry, repoID int64, repoName, tagName string) error {
 	logger := log.WithFunc("store.syncTag")
 
-	existing, dbErr := s.getTagDigest(ctx, repoID, tagName)
+	existing, dbErr := s.getTagSyncState(ctx, repoID, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
 		logger.Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
 	}
@@ -92,8 +92,14 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 		return err
 	}
 
+	// Image-index tags synced before the platform_sizes column existed have
+	// platform_sizes = NULL forever otherwise: their manifest digest is stable
+	// upstream, so the unchanged-digest fast path below would skip them. Force
+	// one resync per such tag to backfill the new column; subsequent runs hit
+	// the fast path normally.
 	digest := utils.SHA256Hex(raw)
-	if digest == existing {
+	needsPlatformBackfill := existing.kind == manifest.KindImageIndex.String() && !existing.hasPlatformSizes
+	if digest == existing.digest && !needsPlatformBackfill {
 		return nil
 	}
 
@@ -198,10 +204,24 @@ func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName
 	return totalSize, len(m.Manifests), descriptors, platformSizes
 }
 
-func (s *Store) getTagDigest(ctx context.Context, repoID int64, tagName string) (string, error) {
-	var digest string
-	err := s.db.QueryRowContext(ctx, `SELECT digest FROM tags WHERE repository_id = ? AND name = ?`, repoID, tagName).Scan(&digest)
-	return digest, err
+// tagSyncState captures the slice of an existing tag row that syncTag needs
+// to decide whether to skip recomputation. hasPlatformSizes is the NOT NULL
+// presence flag (not the slice itself) because syncTag only needs to know
+// "is this row missing its index materialization" — pulling the actual JSON
+// would be wasted I/O on every sync pass.
+type tagSyncState struct {
+	digest           string
+	kind             string
+	hasPlatformSizes bool
+}
+
+func (s *Store) getTagSyncState(ctx context.Context, repoID int64, tagName string) (tagSyncState, error) {
+	var st tagSyncState
+	err := s.db.QueryRowContext(ctx,
+		`SELECT digest, kind, platform_sizes IS NOT NULL FROM tags WHERE repository_id = ? AND name = ?`,
+		repoID, tagName,
+	).Scan(&st.digest, &st.kind, &st.hasPlatformSizes)
+	return st, err
 }
 
 func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, error) {

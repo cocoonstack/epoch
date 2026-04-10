@@ -86,7 +86,7 @@ func (p *PlatformSizes) Scan(src any) error {
 	case string:
 		raw = []byte(v)
 	default:
-		return fmt.Errorf("PlatformSizes.Scan: unsupported type %T", src)
+		return fmt.Errorf("scan platform_sizes: unsupported type %T", src)
 	}
 	if len(raw) == 0 {
 		*p = nil
