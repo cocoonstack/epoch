@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -154,13 +153,10 @@ func (s *Server) tokenIsValid(r *http.Request, candidate string) bool {
 // writeTokenResponse emits the OCI token JSON. Issued at is in RFC 3339 with
 // no fractional seconds — what the spec example uses.
 func (s *Server) writeTokenResponse(w http.ResponseWriter, token string) {
-	resp := tokenResponse{
+	writeJSON(w, http.StatusOK, tokenResponse{
 		Token:       token,
 		AccessToken: token,
 		ExpiresIn:   tokenLifetimeSeconds,
 		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck,gosec // best-effort write to client
+	})
 }

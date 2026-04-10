@@ -2,8 +2,6 @@ package server
 
 import (
 	"net/http"
-
-	"github.com/cocoonstack/epoch/store"
 )
 
 // GET /api/stats
@@ -22,9 +20,6 @@ func (s *Server) apiListRepositories(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	if repos == nil {
-		repos = []store.Repository{}
 	}
 	writeJSON(w, http.StatusOK, repos)
 }
@@ -52,9 +47,6 @@ func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if tags == nil {
-		tags = []store.Tag{}
-	}
 	writeJSON(w, http.StatusOK, tags)
 }
 
@@ -73,12 +65,7 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := tagResponse(t)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, tagResponse(t))
 }
 
 // DELETE /api/repositories/{name}/tags/{tag}

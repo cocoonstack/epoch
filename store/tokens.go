@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -35,26 +35,9 @@ func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string
 }
 
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var tokens []Token
-	for rows.Next() {
-		var t Token
-		if err := t.scan(rows); err != nil {
-			return nil, fmt.Errorf("scan token: %w", err)
-		}
-		tokens = append(tokens, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tokens: %w", err)
-	}
-	if tokens == nil {
-		tokens = []Token{}
-	}
-	return tokens, nil
+	return queryRows(ctx, s.db, `SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id`, func(rows *sql.Rows, t *Token) error {
+		return t.scan(rows)
+	})
 }
 
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
@@ -77,9 +60,13 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	s.tokenCache.Store(hash, tokenCacheEntry{valid: valid, expires: time.Now().Add(tokenCacheTTL)})
 
 	if valid {
+		// Detach from the request ctx so a client disconnect cannot abort
+		// the last_used write mid-flight; this goroutine is intentionally
+		// fire-and-forget and must outlive the caller.
+		bgCtx := context.WithoutCancel(ctx)
 		go func() {
-			if _, err := s.db.ExecContext(context.WithoutCancel(ctx), `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-				log.WithFunc("store.ValidateToken").Warnf(context.WithoutCancel(ctx), "token last_used update failed: %v", err)
+			if _, err := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
+				log.WithFunc("store.ValidateToken").Warnf(bgCtx, "token last_used update failed: %v", err)
 			}
 		}()
 	}

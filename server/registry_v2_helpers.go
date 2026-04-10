@@ -18,12 +18,10 @@ import (
 const defaultManifestMediaType = manifest.MediaTypeOCIManifest
 
 // urlVar returns the value of a route variable extracted by gorilla/mux,
-// or the empty string if the variable is not set.
+// or the empty string if the variable is not set. mux.Vars always returns
+// a non-nil map, so a missing key falls through to the zero value.
 func urlVar(r *http.Request, name string) string {
-	if v := mux.Vars(r); v != nil {
-		return v[name]
-	}
-	return ""
+	return mux.Vars(r)[name]
 }
 
 func stripSHA256Prefix(s string) string {

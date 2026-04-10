@@ -23,7 +23,8 @@ import (
 // chunk bodies into the session tempfile. The source is an io.LimitReader
 // wrapping the HTTP request body, which does not forward WriterTo, so
 // io.Copy would fall through to its 32 KiB default — millions of syscalls
-// per multi-GiB layer. A 1 MiB buffer cuts that ~32x.
+// per multi-GiB layer. A 1 MiB buffer cuts that ~32x. The buffer lives on
+// uploadSessions and is reused across Append calls under u.mu.
 const (
 	defaultUploadMaxBytes = int64(40) << 30 // 40 GiB per session
 	defaultUploadTTL      = time.Hour
@@ -98,6 +99,7 @@ func (f *FinalizedUpload) Close() error {
 type uploadSessions struct {
 	mu       sync.Mutex
 	sessions map[string]*uploadSession
+	scratch  []byte // io.CopyBuffer reuse buffer; only touched under mu
 	dir      string
 	maxBytes int64
 	ttl      time.Duration
@@ -116,6 +118,7 @@ type uploadSession struct {
 func newUploadSessions(dir string) *uploadSessions {
 	return &uploadSessions{
 		sessions: make(map[string]*uploadSession),
+		scratch:  make([]byte, uploadCopyBufSize),
 		dir:      dir,
 		maxBytes: defaultUploadMaxBytes,
 		ttl:      defaultUploadTTL,
@@ -166,8 +169,10 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	}
 	startSize := sess.size
 	remaining := u.maxBytes - startSize
-	scratch := make([]byte, uploadCopyBufSize)
-	n, copyErr := io.CopyBuffer(sess.file, io.LimitReader(src, remaining+1), scratch)
+	// Reuse u.scratch across every Append — the whole method runs under u.mu
+	// so the buffer is never touched concurrently, and a 1 MiB alloc per
+	// PATCH on multi-GiB chunked uploads would otherwise add up fast.
+	n, copyErr := io.CopyBuffer(sess.file, io.LimitReader(src, remaining+1), u.scratch)
 	if copyErr != nil {
 		if rbErr := sess.rollback(startSize); rbErr != nil {
 			u.poisonLocked(id, sess)

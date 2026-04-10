@@ -2,14 +2,11 @@ package utils
 
 import "testing"
 
-func TestTruncate(t *testing.T) {
-	if got := Truncate("abcdef", 3); got != "abc" {
-		t.Fatalf("Truncate = %q, want %q", got, "abc")
+func TestFirstNonEmpty(t *testing.T) {
+	if got := FirstNonEmpty("", "  ", "first", "second"); got != "first" {
+		t.Fatalf("FirstNonEmpty = %q, want %q", got, "first")
 	}
-	if got := Truncate("ab", 3); got != "ab" {
-		t.Fatalf("Truncate short string = %q, want %q", got, "ab")
-	}
-	if got := Truncate("abc", 0); got != "abc" {
-		t.Fatalf("Truncate zero = %q, want %q", got, "abc")
+	if got := FirstNonEmpty("", "  "); got != "" {
+		t.Fatalf("FirstNonEmpty all blank = %q, want \"\"", got)
 	}
 }

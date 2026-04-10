@@ -2,13 +2,13 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"github.com/cocoonstack/epoch/utils"
 )
 
 func TestValidateTokenCachesAndUpdatesAsync(t *testing.T) {
@@ -20,8 +20,7 @@ func TestValidateTokenCachesAndUpdatesAsync(t *testing.T) {
 
 	s := &Store{db: db}
 	token := "test-token-for-validate-token"
-	hash := sha256.Sum256([]byte(token))
-	digest := hex.EncodeToString(hash[:])
+	digest := utils.SHA256Hex([]byte(token))
 
 	mock.ExpectQuery("SELECT 1 FROM tokens WHERE token_hash = \\? LIMIT 1").
 		WithArgs(digest).
@@ -52,8 +51,7 @@ func TestValidateTokenReturnsFalseWhenTokenMissing(t *testing.T) {
 
 	s := &Store{db: db}
 	token := "missing"
-	hash := sha256.Sum256([]byte(token))
-	digest := hex.EncodeToString(hash[:])
+	digest := utils.SHA256Hex([]byte(token))
 
 	mock.ExpectQuery("SELECT 1 FROM tokens WHERE token_hash = \\? LIMIT 1").
 		WithArgs(digest).
