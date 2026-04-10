@@ -81,7 +81,7 @@ func TestClassify(t *testing.T) {
 					{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:bb","size":675,"platform":{"architecture":"arm64","os":"linux"}}
 				]
 			}`,
-			want: KindContainerImage,
+			want: KindImageIndex,
 		},
 		{
 			name: "docker manifest list",
@@ -90,7 +90,7 @@ func TestClassify(t *testing.T) {
 				"mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
 				"manifests": []
 			}`,
-			want: KindContainerImage,
+			want: KindImageIndex,
 		},
 		{
 			name: "manifest with no discriminator",
@@ -169,6 +169,44 @@ func TestParse(t *testing.T) {
 	}
 	if m.Annotations[AnnotationSnapshotBaseImage] != "ghcr.io/cocoonstack/cocoon/ubuntu:24.04" {
 		t.Errorf("baseimage annotation mismatch: %q", m.Annotations[AnnotationSnapshotBaseImage])
+	}
+}
+
+func TestParseIndex(t *testing.T) {
+	raw := `{
+		"schemaVersion": 2,
+		"mediaType": "application/vnd.oci.image.index.v1+json",
+		"manifests": [
+			{
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"digest": "sha256:aaaa",
+				"size": 675,
+				"platform": {"architecture": "amd64", "os": "linux"}
+			},
+			{
+				"mediaType": "application/vnd.oci.image.manifest.v1+json",
+				"digest": "sha256:bbbb",
+				"size": 675,
+				"platform": {"architecture": "arm64", "os": "linux", "variant": "v8"}
+			}
+		]
+	}`
+
+	m, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := ClassifyParsed(m); got != KindImageIndex {
+		t.Errorf("ClassifyParsed = %v, want KindImageIndex", got)
+	}
+	if len(m.Manifests) != 2 {
+		t.Fatalf("len(Manifests) = %d, want 2", len(m.Manifests))
+	}
+	if m.Manifests[0].Platform == nil || m.Manifests[0].Platform.Architecture != "amd64" {
+		t.Errorf("Manifests[0] arch = %+v, want amd64", m.Manifests[0].Platform)
+	}
+	if m.Manifests[1].Platform == nil || m.Manifests[1].Platform.Variant != "v8" {
+		t.Errorf("Manifests[1] variant = %+v, want v8", m.Manifests[1].Platform)
 	}
 }
 

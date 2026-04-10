@@ -64,15 +64,15 @@ type Token struct {
 }
 
 func (r *Repository) scanSummary(row rowScanner) error {
-	return row.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize, &r.ArtifactType)
+	return row.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize, &r.ArtifactType, &r.Kind)
 }
 
 func (t *Tag) scanSummary(row rowScanner) error {
-	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.Kind, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
 }
 
 func (t *Tag) scanDetails(row rowScanner) error {
-	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.ManifestJSON, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
+	return row.Scan(&t.ID, &t.RepositoryID, &t.Name, &t.Digest, &t.ArtifactType, &t.Kind, &t.ManifestJSON, &t.TotalSize, &t.LayerCount, &t.PushedAt, &t.SyncedAt)
 }
 
 func (t *Token) scan(row rowScanner) error {

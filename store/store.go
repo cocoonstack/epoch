@@ -64,6 +64,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			name            VARCHAR(255) NOT NULL,
 			digest          CHAR(64) NOT NULL,
 			artifact_type   VARCHAR(255) NOT NULL DEFAULT '',
+			kind            VARCHAR(32) NOT NULL DEFAULT '',
 			manifest_json   MEDIUMTEXT NOT NULL,
 			total_size      BIGINT NOT NULL DEFAULT 0,
 			layer_count     INT NOT NULL DEFAULT 0,
@@ -100,5 +101,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens DROP COLUMN token_plain`)
 	// Migration: add artifact_type to tags (ignore error if column already exists).
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN artifact_type VARCHAR(255) NOT NULL DEFAULT ''`)
+	// Migration: add kind to tags. Stored at sync time so the UI does not
+	// need to round-trip through artifact_type → mediaType heuristics.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT ''`)
 	return nil
 }

@@ -341,6 +341,12 @@ tbody tr:hover {
   color: var(--amber);
 }
 
+.badge-image-index {
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  border: 1px dashed currentColor;
+}
+
 .badge-unknown {
   background: var(--surface-sunken);
   color: var(--text-secondary);

@@ -75,7 +75,10 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 }
 
 // syncTag fetches a single manifest from the registry, parses it, and writes
-// the tag + its blob descriptors into the SQL transaction.
+// the tag + its blob descriptors into the SQL transaction. For OCI image
+// indexes the function recurses into each child manifest so the aggregated
+// totalSize / layerCount / blobs row reflect the whole multi-arch artifact,
+// not just the index envelope (which has no layers of its own).
 func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry, repoID int64, repoName, tagName string) error {
 	logger := log.WithFunc("store.syncTag")
 
@@ -99,29 +102,82 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 		return fmt.Errorf("decode manifest %s:%s: %w", repoName, tagName, err)
 	}
 
-	totalSize := m.Config.Size
-	for _, layer := range m.Layers {
-		totalSize += layer.Size
-	}
+	kind := manifest.ClassifyParsed(m)
+	totalSize, layerCount, descriptors := tagAggregates(ctx, reg, repoName, m, kind, logger)
 
 	t := Tag{
 		Name:         tagName,
 		Digest:       digest,
 		ArtifactType: m.ArtifactType,
+		Kind:         kind.String(),
 		ManifestJSON: string(raw),
 		TotalSize:    totalSize,
-		LayerCount:   len(m.Layers),
+		LayerCount:   layerCount,
 		PushedAt:     manifestPushedAt(m),
 	}
 	if err := upsertTagTx(ctx, tx, repoID, t); err != nil {
 		return err
 	}
 
-	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
 	if err := batchUpsertBlobsTx(ctx, tx, descriptors); err != nil {
 		logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
 	}
 	return nil
+}
+
+// tagAggregates returns (totalSize, layerCount, descriptors) for the given
+// manifest. For image manifests this is just config + layers. For image
+// indexes it walks each child manifest by digest and dedupes shared blobs
+// across platforms — most multi-arch images publish per-arch layers, but
+// shared base layers (and configs identical across arches) collapse to a
+// single counted byte.
+//
+// layerCount for an index is the number of platform manifests it references
+// (the natural answer to "how many things compose this tag" when the tag is
+// multi-arch). Per-platform layer counts are surfaced separately by the tag
+// detail API.
+func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind, logger *log.Fields) (int64, int, []manifest.Descriptor) {
+	if kind == manifest.KindImageIndex {
+		return expandIndexAggregates(ctx, reg, repoName, m, logger)
+	}
+	totalSize := m.Config.Size
+	for _, layer := range m.Layers {
+		totalSize += layer.Size
+	}
+	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
+	return totalSize, len(m.Layers), descriptors
+}
+
+// expandIndexAggregates fetches every child manifest of an image index and
+// returns the aggregated totals. Failures fetching a single child are logged
+// and skipped — partial aggregates are better than refusing to sync the
+// whole tag because one platform's manifest is unreachable.
+func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor) {
+	seen := make(map[string]bool)
+	var totalSize int64
+	descriptors := make([]manifest.Descriptor, 0, 4*len(m.Manifests))
+
+	for _, child := range m.Manifests {
+		childRaw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
+		if err != nil {
+			logger.Warnf(ctx, "fetch index child %s@%s: %v", repoName, child.Digest, err)
+			continue
+		}
+		childM, err := manifest.Parse(childRaw)
+		if err != nil {
+			logger.Warnf(ctx, "parse index child %s@%s: %v", repoName, child.Digest, err)
+			continue
+		}
+		for _, d := range slices.Concat([]manifest.Descriptor{childM.Config}, childM.Layers) {
+			if d.Digest == "" || seen[d.Digest] {
+				continue
+			}
+			seen[d.Digest] = true
+			totalSize += d.Size
+			descriptors = append(descriptors, d)
+		}
+	}
+	return totalSize, len(m.Manifests), descriptors
 }
 
 func (s *Store) getTagDigest(ctx context.Context, repoID int64, tagName string) (string, error) {
@@ -141,13 +197,14 @@ func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, er
 
 func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO tags (repository_id, name, digest, artifact_type, manifest_json, total_size, layer_count, pushed_at, synced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+		INSERT INTO tags (repository_id, name, digest, artifact_type, kind, manifest_json, total_size, layer_count, pushed_at, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
-			digest=VALUES(digest), artifact_type=VALUES(artifact_type), manifest_json=VALUES(manifest_json),
+			digest=VALUES(digest), artifact_type=VALUES(artifact_type), kind=VALUES(kind),
+			manifest_json=VALUES(manifest_json),
 			total_size=VALUES(total_size), layer_count=VALUES(layer_count),
 			pushed_at=VALUES(pushed_at), synced_at=NOW()`,
-		repoID, t.Name, t.Digest, t.ArtifactType, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PushedAt)
+		repoID, t.Name, t.Digest, t.ArtifactType, t.Kind, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PushedAt)
 	return err
 }
 
@@ -232,19 +289,5 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 				}
 			}
 		}
-	}
-}
-
-// artifactKindString maps an OCI artifactType to the human-readable kind name
-// used by the UI. Falls back to "container-image" for empty / unknown values
-// because plain container images don't carry an artifactType.
-func artifactKindString(artifactType string) string {
-	switch artifactType {
-	case manifest.ArtifactTypeSnapshot:
-		return manifest.KindSnapshot.String()
-	case manifest.ArtifactTypeOSImage:
-		return manifest.KindCloudImage.String()
-	default:
-		return manifest.KindContainerImage.String()
 	}
 }

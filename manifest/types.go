@@ -33,6 +33,12 @@ const (
 	KindContainerImage
 	KindCloudImage
 	KindSnapshot
+	// KindImageIndex is an OCI image index or Docker manifest list — a
+	// multi-arch envelope that references one image manifest per platform
+	// (e.g. ghcr.io/cocoonstack/cocoon/ubuntu:24.04). The index itself has
+	// no layers; epoch's sync layer walks the children to compute aggregate
+	// size and surface a per-platform breakdown in the UI.
+	KindImageIndex
 )
 
 // String returns a short human-readable name for the kind.
@@ -44,6 +50,8 @@ func (k Kind) String() string {
 		return "cloud-image"
 	case KindSnapshot:
 		return "snapshot"
+	case KindImageIndex:
+		return "image-index"
 	default:
 		return "unknown"
 	}
@@ -69,17 +77,41 @@ func (d Descriptor) Title() string {
 	return d.Annotations[AnnotationTitle]
 }
 
-// OCIManifest is a parsed OCI 1.1 image manifest. It is intentionally a
-// strict subset of the spec — epoch never produces or consumes fields outside
-// this surface.
+// OCIManifest is a parsed OCI 1.1 image manifest OR an OCI image index.
+// The two share enough structure that we use one type for both: image
+// manifests populate Config + Layers; image indexes populate Manifests
+// (the per-platform child descriptors). Mutually exclusive in practice —
+// callers branch on [ClassifyParsed] to know which fields to read.
 type OCIManifest struct {
 	SchemaVersion int               `json:"schemaVersion"`
 	MediaType     string            `json:"mediaType,omitempty"`
 	ArtifactType  string            `json:"artifactType,omitempty"`
 	Config        Descriptor        `json:"config"`
 	Layers        []Descriptor      `json:"layers"`
+	Manifests     []IndexManifest   `json:"manifests,omitempty"`
 	Subject       *Descriptor       `json:"subject,omitempty"`
 	Annotations   map[string]string `json:"annotations,omitempty"`
+}
+
+// IndexManifest is a single entry in an OCI image index's `manifests[]`
+// array — a content-addressed pointer to a per-platform image manifest plus
+// the platform metadata that lets clients (and the epoch UI) know which
+// architecture/OS each child targets.
+type IndexManifest struct {
+	MediaType string    `json:"mediaType"`
+	Digest    string    `json:"digest"`
+	Size      int64     `json:"size"`
+	Platform  *Platform `json:"platform,omitempty"`
+}
+
+// Platform describes the OS / architecture target of an image manifest
+// inside an OCI image index. Variant is populated for arches that have
+// sub-flavors (e.g. arm/v7, arm/v8).
+type Platform struct {
+	Architecture string `json:"architecture,omitempty"`
+	OS           string `json:"os,omitempty"`
+	OSVersion    string `json:"os.version,omitempty"`
+	Variant      string `json:"variant,omitempty"`
 }
 
 // Parse decodes raw manifest bytes into an [OCIManifest]. Wraps the JSON
@@ -98,8 +130,8 @@ func Parse(raw []byte) (*OCIManifest, error) {
 //  1. Top-level `artifactType` (OCI 1.1) for cocoonstack-specific values.
 //  2. `config.mediaType` for plain OCI / Docker container image manifests.
 //  3. Top-level `mediaType` for OCI image indexes / Docker manifest lists,
-//     which are always container images when no cocoonstack artifactType
-//     is set (multi-arch images like ghcr.io/cocoonstack/cocoon/ubuntu:24.04).
+//     classified as KindImageIndex so the UI and sync layer can render the
+//     per-platform breakdown instead of treating them as a single image.
 //
 // The function does not validate the manifest against the OCI spec —
 // malformed JSON returns KindUnknown plus the parse error.
@@ -139,7 +171,7 @@ func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
 
 	switch topMediaType {
 	case MediaTypeOCIIndex, MediaTypeDockerIndex:
-		return KindContainerImage
+		return KindImageIndex
 	}
 
 	return KindUnknown

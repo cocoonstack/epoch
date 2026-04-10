@@ -43,10 +43,20 @@ function shortMediaType(mt) {
   return mt.replace('application/vnd.cocoon.', '').replace('application/', '');
 }
 
-// badgeKinds mirrors the strings emitted by store.artifactKindString on the
+// platformLabel turns an OCI image-index platform descriptor into a compact
+// human label like "linux/amd64" or "linux/arm64/v8". Empty platform falls
+// back to an em dash so the cell still aligns.
+function platformLabel(p) {
+  if (!p) return '\u2014';
+  const parts = [p.os, p.architecture].filter(Boolean);
+  if (p.variant) parts.push(p.variant);
+  return parts.length ? parts.join('/') : '\u2014';
+}
+
+// badgeKinds mirrors the strings emitted by manifest.Kind.String() on the
 // server. Anything outside this set falls back to "unknown" so the function
 // is safe to call with raw API values without HTML-escaping.
-const badgeKinds = new Set(['snapshot', 'cloud-image', 'container-image', 'unknown']);
+const badgeKinds = new Set(['snapshot', 'cloud-image', 'container-image', 'image-index', 'unknown']);
 
 function badgeHTML(type) {
   const safe = badgeKinds.has(type) ? type : 'unknown';
@@ -166,6 +176,10 @@ async function renderTagDetail(el, name, tag) {
     const m = data.manifest || {};
     const layers = m.layers || [];
     const baseImages = m.baseImages || [];
+    // For OCI image indexes (multi-arch), `manifests[]` lists the per-platform
+    // child manifests. Each entry carries platform.{architecture,os,variant}
+    // and is content-addressed via its sha256 digest.
+    const platforms = m.manifests || [];
     const maxSize = Math.max(...layers.map(l => l.size || 0), 1);
 
     render(el, `
@@ -243,6 +257,30 @@ async function renderTagDetail(el, name, tag) {
                   <td class="cell-mono">${shortMediaType(l.mediaType)}</td>
                   <td class="cell-size">${humanSize(l.size)}</td>
                   <td class="cell-mono">${shortDigest(l.digest)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      ${platforms.length > 0 ? `
+        <div class="section-title">Platforms (${platforms.length})</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Platform</th>
+              <th>Type</th>
+              <th>Manifest Size</th>
+              <th>Digest</th>
+            </tr></thead>
+            <tbody>
+              ${platforms.map(p => `
+                <tr>
+                  <td class="cell-name">${platformLabel(p.platform)}</td>
+                  <td class="cell-mono">${shortMediaType(p.mediaType)}</td>
+                  <td class="cell-size">${humanSize(p.size)}</td>
+                  <td class="cell-mono">${shortDigest(p.digest)}</td>
                 </tr>
               `).join('')}
             </tbody>
