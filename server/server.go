@@ -163,8 +163,9 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	api.HandleFunc("/repositories/{name:.+}/tags", s.apiListTags).Methods(http.MethodGet)
 	api.HandleFunc("/repositories/{name:.+}", s.apiGetRepository).Methods(http.MethodGet)
 
-	// Public artifact download (auth-exempt, single canonical path).
-	s.router.HandleFunc("/dl/{name}", s.handleArtifactDownload).Methods(http.MethodGet)
+	// Public artifact download (auth-exempt). {name:.+} matches multi-segment
+	// repository names like windows/win11 so /dl/windows/win11 routes correctly.
+	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 
 	// Frontend — embedded UI catches everything else under `/`.
 	uiFS, err := fs.Sub(ui.FS, ".")
