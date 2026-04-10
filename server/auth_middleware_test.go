@@ -1,9 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gorilla/mux"
 )
 
 func TestIsPublicPath(t *testing.T) {
@@ -12,8 +16,10 @@ func TestIsPublicPath(t *testing.T) {
 		"/login",
 		"/login/callback",
 		"/logout",
+		"/v2/token", // OCI Distribution token issuer
 		"/dl/win11",
 		"/dl/ubuntu-22.04", // dots in image name now work via /dl/
+		"/dl/windows/win11",
 	}
 	private := []string{
 		"/",
@@ -22,9 +28,15 @@ func TestIsPublicPath(t *testing.T) {
 		"/api/repositories",
 		"/favicon.ico",
 		"/style.css",
-		// Bare paths no longer bypass auth (removed handleImageOrUI).
+		// Bare paths never bypass auth.
 		"/win11",
 		"/ubuntu",
+		// Prefix-match hardening: paths that would have leaked as public
+		// under the old strings.HasPrefix match.
+		"/loginbad",
+		"/logoutXYZ",
+		"/v2/tokens",
+		"/v2/tokenizer",
 	}
 	for _, p := range public {
 		if !isPublicPath(p) {
@@ -35,6 +47,39 @@ func TestIsPublicPath(t *testing.T) {
 		if isPublicPath(p) {
 			t.Errorf("isPublicPath(%q) = true, want false", p)
 		}
+	}
+}
+
+// TestLoginRouteNotShadowedByUICatchall is a regression test: when SSO is
+// enabled, setupAuthRoutes must register /login BEFORE the PathPrefix("/")
+// UI catchall, otherwise gorilla/mux routes /login to the embedded UI file
+// server which returns 404.
+func TestLoginRouteNotShadowedByUICatchall(t *testing.T) {
+	s := &Server{
+		router: mux.NewRouter(),
+		sso: &SSOConfig{
+			Provider:     "google",
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+			RedirectURI:  "https://epoch.example/login/callback",
+			AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
+			TokenURL:     "https://oauth2.googleapis.com/token",
+			UserInfoURL:  "https://openidconnect.googleapis.com/v1/userinfo",
+			Scopes:       "openid profile email",
+			CookieSecret: []byte("0123456789abcdef0123456789abcdef"),
+		},
+	}
+	s.setupRoutes(context.Background())
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GET /login status = %d, want 302 (route shadowed by UI catchall?)", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "accounts.google.com") {
+		t.Errorf("GET /login Location = %q, want OAuth provider URL", loc)
 	}
 }
 

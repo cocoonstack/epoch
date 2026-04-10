@@ -5,20 +5,30 @@ import (
 	"strings"
 )
 
-// publicPathPrefixes lists path prefixes that bypass auth entirely. Cloud
-// image downloads are public so vk-cocoon and other consumers can pull
-// without holding a registry token. The OCI Distribution token issuer is
-// also listed because it does its own basic-auth check internally.
-var publicPathPrefixes = []string{
-	"/login",
-	"/logout",
-	"/dl/",
-	"/v2/token",
+// publicExactPaths lists paths that bypass auth entirely when matched
+// exactly. The OCI Distribution token endpoint is included because it does
+// its own basic-auth check internally; the SSO login/logout endpoints are
+// public so the redirect-to-/login flow terminates.
+//
+// Exact matching is deliberate: a loose prefix match (e.g. `/login` as a
+// prefix) would leak any future route whose name accidentally starts with
+// one of these strings (think `/v2/tokens`).
+var publicExactPaths = map[string]bool{
+	"/healthz":        true,
+	"/login":          true,
+	"/login/callback": true,
+	"/logout":         true,
+	"/v2/token":       true,
 }
+
+// publicPathPrefixes lists path prefixes that bypass auth. Only the public
+// artifact download path is a prefix match because cloud image names are
+// multi-segment (e.g. `/dl/windows/win11`).
+var publicPathPrefixes = []string{"/dl/"}
 
 // isPublicPath returns true for paths that bypass authentication entirely.
 func isPublicPath(path string) bool {
-	if path == "/healthz" {
+	if publicExactPaths[path] {
 		return true
 	}
 	for _, p := range publicPathPrefixes {

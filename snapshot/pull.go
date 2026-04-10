@@ -111,10 +111,10 @@ type StreamOptions struct {
 // responsible for piping the bytes to wherever they should land.
 func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
-		return errors.New("snapshot stream: Name is required")
+		return errors.New("snapshot stream: name is required")
 	}
 	if opts.Writer == nil {
-		return errors.New("snapshot stream: Writer is required")
+		return errors.New("snapshot stream: writer is required")
 	}
 
 	kind, err := manifest.Classify(raw)
@@ -138,10 +138,10 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 // handler) use this to avoid a redundant JSON unmarshal.
 func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
-		return errors.New("snapshot stream: Name is required")
+		return errors.New("snapshot stream: name is required")
 	}
 	if opts.Writer == nil {
-		return errors.New("snapshot stream: Writer is required")
+		return errors.New("snapshot stream: writer is required")
 	}
 	localName := opts.LocalName
 	if localName == "" {

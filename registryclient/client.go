@@ -18,6 +18,14 @@ import (
 const (
 	defaultBaseURL    = "http://127.0.0.1:8080"
 	maxErrorBodyBytes = 512
+
+	// manifestAcceptHeader lists every manifest media type the client knows
+	// how to handle. Sent on every GET /v2/.../manifests/... request — Docker
+	// Hub / GHCR will return 415 or a different schema if it is missing.
+	manifestAcceptHeader = "application/vnd.oci.image.manifest.v1+json, " +
+		"application/vnd.oci.image.index.v1+json, " +
+		"application/vnd.docker.distribution.manifest.v2+json, " +
+		"application/vnd.docker.distribution.manifest.list.v2+json"
 )
 
 // Client wraps the OCI Distribution endpoints epoch CLIs use.
@@ -59,14 +67,6 @@ func (c *Client) BaseURL() string {
 }
 
 // --- Manifests ---
-
-// manifestAcceptHeader lists every manifest media type the client knows how
-// to handle. Sent on every GET /v2/.../manifests/... request — Docker Hub /
-// GHCR will return 415 or a different schema if it is missing.
-const manifestAcceptHeader = "application/vnd.oci.image.manifest.v1+json, " +
-	"application/vnd.oci.image.index.v1+json, " +
-	"application/vnd.docker.distribution.manifest.v2+json, " +
-	"application/vnd.docker.distribution.manifest.list.v2+json"
 
 // GetManifest downloads a manifest's raw bytes for `name:tag` and returns
 // them along with the server-supplied Content-Type. Callers that need to

@@ -99,7 +99,7 @@ func TestClientV2RoundTrip(t *testing.T) {
 		t.Errorf("body = %q, want %q", data, manifestBody)
 	}
 
-	if err := c.PutManifest(ctx, repoName, "v2", []byte(manifestBody), manifestType); err != nil {
+	if err = c.PutManifest(ctx, repoName, "v2", []byte(manifestBody), manifestType); err != nil {
 		t.Fatalf("PutManifest error: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestClientV2RoundTrip(t *testing.T) {
 		t.Fatalf("BlobExists = true, want false")
 	}
 
-	if err := c.PutBlob(ctx, repoName, blobDigest, strings.NewReader("blob"), 4); err != nil {
+	if err = c.PutBlob(ctx, repoName, blobDigest, strings.NewReader("blob"), 4); err != nil {
 		t.Fatalf("PutBlob error: %v", err)
 	}
 

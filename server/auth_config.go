@@ -18,6 +18,7 @@ const (
 	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
 
 	providerGoogle = "google"
+	providerOIDC   = "oidc"
 )
 
 // SSOConfig holds optional UI auth settings loaded from the environment.
@@ -88,7 +89,7 @@ func detectProvider() string {
 	case os.Getenv("GOOGLE_OAUTH_CLIENT_ID") != "":
 		return providerGoogle
 	case os.Getenv("SSO_CLIENT_ID") != "":
-		return "oidc"
+		return providerOIDC
 	default:
 		return ""
 	}
@@ -109,9 +110,9 @@ func loadProviderConfig(provider string) *SSOConfig {
 			Scopes:        utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
 			HostedDomains: parseHostedDomains(os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN")),
 		}
-	case "oidc":
+	case providerOIDC:
 		return &SSOConfig{
-			Provider:     "oidc",
+			Provider:     providerOIDC,
 			ClientID:     os.Getenv("SSO_CLIENT_ID"),
 			ClientSecret: os.Getenv("SSO_CLIENT_SECRET"),
 			RedirectURI:  os.Getenv("SSO_REDIRECT_URI"),

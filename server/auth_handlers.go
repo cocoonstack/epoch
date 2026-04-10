@@ -129,6 +129,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := http.DefaultClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
 	if err != nil {
+		logger.Error(ctx, err, "userinfo fetch failed")
 		http.Error(w, "userinfo failed", http.StatusBadGateway)
 		return
 	}

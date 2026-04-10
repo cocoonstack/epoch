@@ -65,9 +65,6 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 		uploads:       newUploadSessions(),
 	}
 	s.setupRoutes(ctx)
-	if sso != nil {
-		s.setupAuthRoutes()
-	}
 	return s
 }
 
@@ -167,7 +164,16 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// repository names like windows/win11 so /dl/windows/win11 routes correctly.
 	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 
-	// Frontend — embedded UI catches everything else under `/`.
+	// SSO login / logout routes must be registered BEFORE the UI catchall
+	// below; gorilla/mux matches routes in registration order, so a route
+	// added after PathPrefix("/") would be shadowed and 404 via the file
+	// server.
+	if s.sso != nil {
+		s.setupAuthRoutes()
+	}
+
+	// Frontend — embedded UI catches everything else under `/`. Must be
+	// registered last so specific routes win.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
 		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)

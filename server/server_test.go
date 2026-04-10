@@ -8,8 +8,10 @@ import (
 	"time"
 )
 
+type testCtxKey struct{}
+
 func TestNewHTTPServerConfiguresTimeoutsAndBaseContext(t *testing.T) {
-	ctx := context.WithValue(context.Background(), struct{}{}, "value")
+	ctx := context.WithValue(context.Background(), testCtxKey{}, "value")
 
 	srv := newHTTPServer(ctx, ":8080", http.NewServeMux())
 
