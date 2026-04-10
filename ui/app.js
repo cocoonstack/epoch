@@ -453,11 +453,10 @@ async function renderTokens(el) {
       ${tokens.length === 0
         ? emptyState('No tokens created. Use the button above to create one.')
         : `<table class="table"><thead><tr>
-            <th>Name</th><th>Token</th><th>Created By</th><th>Created</th><th>Last Used</th><th></th>
+            <th>Name</th><th>Created By</th><th>Created</th><th>Last Used</th><th></th>
           </tr></thead><tbody>
           ${tokens.map(t => `<tr>
             <td><strong>${t.name}</strong></td>
-            <td><code style="font-size:11px;color:#565f89" title="Tokens are hashed at rest and only shown once at creation time">\u2014</code></td>
             <td>${t.createdBy || '\u2014'}</td>
             <td>${timeAgo(t.createdAt)}</td>
             <td>${t.lastUsed ? timeAgo(t.lastUsed) : 'never'}</td>
