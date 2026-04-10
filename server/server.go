@@ -259,11 +259,14 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 // --- Middleware ---
 
 func (s *Server) withLogging(next http.Handler) http.Handler {
+	// Build the logger once at wire-up time so the per-request hot path does
+	// not allocate a new Fields struct on every call.
+	logger := log.WithFunc("server.withLogging")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		log.WithFunc("server.withLogging").Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
+		logger.Infof(r.Context(), "%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start).Round(time.Millisecond))
 	})
 }
 

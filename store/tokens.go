@@ -47,6 +47,7 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 }
 
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
+	logger := log.WithFunc("store.ValidateToken")
 	hash := utils.SHA256Hex([]byte(plaintext))
 
 	if entry, ok := s.tokenCache.Load(hash); ok {
@@ -66,7 +67,7 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
 			if _, err := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-				log.WithFunc("store.ValidateToken").Warnf(bgCtx, "token last_used update failed: %v", err)
+				logger.Warnf(bgCtx, "token last_used update failed: %v", err)
 			}
 		}()
 	}

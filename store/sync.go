@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -16,6 +17,14 @@ import (
 	"github.com/cocoonstack/epoch/registry"
 	"github.com/cocoonstack/epoch/utils"
 )
+
+// indexFetchConcurrency caps the number of in-flight child-manifest fetches
+// when expanding an OCI image index. Bounded so a 100-platform index does
+// not spawn 100 simultaneous S3 round-trips and so the underlying object
+// store client's connection pool stays predictable. 4 is a reasonable
+// default for typical multi-arch images (linux/amd64 + linux/arm64 +
+// optional attestations).
+const indexFetchConcurrency = 4
 
 // errSyncInProgress signals that another goroutine is already running
 // SyncFromCatalog. Returned (and silently swallowed by background callers)
@@ -164,35 +173,34 @@ func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string,
 // fetching a single child are logged and skipped — partial aggregates are
 // better than refusing to sync the whole tag because one platform's manifest
 // is unreachable.
+//
+// The fetch phase runs in parallel up to [indexFetchConcurrency] workers
+// because a multi-arch index can otherwise serialize N S3 round-trips on a
+// single sync pass. The aggregate phase is serialized to keep the descriptor
+// ordering and dedup map race-free.
 func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
+	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests, logger)
+
 	seen := make(map[string]bool)
 	var totalSize int64
 	descriptors := make([]manifest.Descriptor, 0, 4*len(m.Manifests))
 	platformSizes := make(PlatformSizes, 0, len(m.Manifests))
 
-	for _, child := range m.Manifests {
-		childRaw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
-		if err != nil {
-			logger.Warnf(ctx, "fetch index child %s@%s: %v", repoName, child.Digest, err)
+	for _, f := range fetched {
+		if f == nil {
 			continue
 		}
-		childM, err := manifest.Parse(childRaw)
-		if err != nil {
-			logger.Warnf(ctx, "parse index child %s@%s: %v", repoName, child.Digest, err)
-			continue
-		}
-
-		childSize := childM.Config.Size
-		for _, l := range childM.Layers {
+		childSize := f.parsed.Config.Size
+		for _, l := range f.parsed.Layers {
 			childSize += l.Size
 		}
 		platformSizes = append(platformSizes, PlatformSize{
-			Digest:     child.Digest,
+			Digest:     f.digest,
 			Size:       childSize,
-			LayerCount: len(childM.Layers),
+			LayerCount: len(f.parsed.Layers),
 		})
 
-		for _, d := range slices.Concat([]manifest.Descriptor{childM.Config}, childM.Layers) {
+		for _, d := range slices.Concat([]manifest.Descriptor{f.parsed.Config}, f.parsed.Layers) {
 			if d.Digest == "" || seen[d.Digest] {
 				continue
 			}
@@ -202,6 +210,50 @@ func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName
 		}
 	}
 	return totalSize, len(m.Manifests), descriptors, platformSizes
+}
+
+// fetchedChild carries one parallel-fetched child manifest of an index.
+// Stored at a fixed slot in fetchIndexChildren's result slice so the
+// aggregate walk preserves the original platform order from the index.
+type fetchedChild struct {
+	digest string
+	parsed *manifest.OCIManifest
+}
+
+// fetchIndexChildren downloads and parses every child manifest of an image
+// index in parallel under a fixed-size worker semaphore. Returns a slice
+// where index i corresponds to children[i]; nil entries mean that child
+// failed to fetch or parse and was already logged.
+func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest, logger *log.Fields) []*fetchedChild {
+	results := make([]*fetchedChild, len(children))
+	if len(children) == 0 {
+		return results
+	}
+
+	sem := make(chan struct{}, indexFetchConcurrency)
+	var wg sync.WaitGroup
+	for i, child := range children {
+		wg.Add(1)
+		go func(i int, child manifest.IndexManifest) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			raw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
+			if err != nil {
+				logger.Warnf(ctx, "fetch index child %s@%s: %v", repoName, child.Digest, err)
+				return
+			}
+			parsed, err := manifest.Parse(raw)
+			if err != nil {
+				logger.Warnf(ctx, "parse index child %s@%s: %v", repoName, child.Digest, err)
+				return
+			}
+			results[i] = &fetchedChild{digest: child.Digest, parsed: parsed}
+		}(i, child)
+	}
+	wg.Wait()
+	return results
 }
 
 // tagSyncState captures the slice of an existing tag row that syncTag needs
