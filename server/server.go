@@ -149,7 +149,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.mux.HandleFunc("DELETE /api/repositories/{path...}", s.apiRepoDispatchDELETE)
 
 	// Public cloud image download (auth-exempt, single canonical path).
-	s.mux.HandleFunc("GET /dl/{name}", s.handleCloudImageDownload)
+	s.mux.HandleFunc("GET /dl/{name}", s.handleArtifactDownload)
 
 	// Frontend — embedded UI.
 	uiFS, err := fs.Sub(ui.FS, ".")

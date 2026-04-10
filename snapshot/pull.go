@@ -58,24 +58,6 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 		return fmt.Errorf("get manifest %s:%s: %w", opts.Name, opts.Tag, err)
 	}
 
-	kind, err := manifest.Classify(raw)
-	if err != nil {
-		return fmt.Errorf("classify manifest: %w", err)
-	}
-	if kind != manifest.KindSnapshot {
-		return fmt.Errorf("manifest %s:%s is %s, not a snapshot", opts.Name, opts.Tag, kind)
-	}
-
-	m, err := manifest.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("parse manifest %s:%s: %w", opts.Name, opts.Tag, err)
-	}
-
-	cfg, err := p.fetchSnapshotConfig(ctx, opts.Name, m.Config)
-	if err != nil {
-		return fmt.Errorf("fetch snapshot config: %w", err)
-	}
-
 	stdin, wait, err := p.Cocoon.Import(ctx, ImportOptions{
 		Name:        localName,
 		Description: opts.Description,
@@ -84,7 +66,12 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 		return fmt.Errorf("start cocoon snapshot import: %w", err)
 	}
 
-	streamErr := p.writeImportStream(ctx, opts.Name, localName, cfg, m.Layers, stdin, opts.Progress)
+	streamErr := Stream(ctx, raw, p.Downloader, StreamOptions{
+		Name:      opts.Name,
+		LocalName: localName,
+		Writer:    stdin,
+		Progress:  opts.Progress,
+	})
 	closeErr := stdin.Close()
 	waitErr := wait()
 
@@ -99,9 +86,66 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	return nil
 }
 
-// writeImportStream writes a tar containing snapshot.json (rebuilt from the
-// snapshot config blob) followed by every layer in manifest order.
-func (p *Puller) writeImportStream(ctx context.Context, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {
+// StreamOptions configures [Stream].
+type StreamOptions struct {
+	// Name is the OCI repository name used to fetch layer blobs. Required.
+	Name string
+	// LocalName overrides the snapshot name written into the rebuilt
+	// snapshot.json envelope. Empty falls back to Name so the importer
+	// reuses the registry repository name.
+	LocalName string
+	// Writer is the destination for the cocoon-import-shaped tar stream.
+	// Required.
+	Writer io.Writer
+	// Progress receives one-line status updates per layer. May be nil.
+	Progress func(string)
+}
+
+// Stream classifies the manifest as a snapshot, fetches its config blob, and
+// writes the cocoon-import tar (snapshot.json envelope + every layer entry)
+// to opts.Writer. It is the function shared between snapshot.Puller (which
+// writes to cocoon's stdin) and epoch's server-side /dl/{name} handler
+// (which writes to the HTTP response body).
+//
+// Stream does not invoke cocoon — it only reassembles the tar. The caller is
+// responsible for piping the bytes to wherever they should land.
+func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) error {
+	if opts.Name == "" {
+		return errors.New("snapshot stream: Name is required")
+	}
+	if opts.Writer == nil {
+		return errors.New("snapshot stream: Writer is required")
+	}
+	localName := opts.LocalName
+	if localName == "" {
+		localName = opts.Name
+	}
+
+	kind, err := manifest.Classify(raw)
+	if err != nil {
+		return fmt.Errorf("classify manifest: %w", err)
+	}
+	if kind != manifest.KindSnapshot {
+		return fmt.Errorf("manifest is %s, not a snapshot", kind)
+	}
+
+	m, err := manifest.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	cfg, err := fetchSnapshotConfig(ctx, dl, opts.Name, m.Config)
+	if err != nil {
+		return fmt.Errorf("fetch snapshot config: %w", err)
+	}
+
+	return writeImportTar(ctx, dl, opts.Name, localName, cfg, m.Layers, opts.Writer, opts.Progress)
+}
+
+// writeImportTar serializes a snapshot to the cocoon-import tar layout:
+// snapshot.json envelope first, then one tar entry per OCI layer in
+// manifest order with the layer's title annotation as the entry name.
+func writeImportTar(ctx context.Context, dl Downloader, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {
 	bw := bufio.NewWriterSize(w, 256<<10)
 	tw := tar.NewWriter(bw)
 
@@ -136,7 +180,7 @@ func (p *Puller) writeImportStream(ctx context.Context, name, localName string, 
 		if progress != nil {
 			progress(fmt.Sprintf("  %s (%d bytes)", title, layer.Size))
 		}
-		if err := streamLayerToTar(ctx, p.Downloader, name, layer, tw, now); err != nil {
+		if err := streamLayerToTar(ctx, dl, name, layer, tw, now); err != nil {
 			return err
 		}
 	}
@@ -148,11 +192,11 @@ func (p *Puller) writeImportStream(ctx context.Context, name, localName string, 
 }
 
 // fetchSnapshotConfig downloads and parses the snapshot config blob.
-func (p *Puller) fetchSnapshotConfig(ctx context.Context, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
+func fetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
 	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
 		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
 	}
-	body, err := p.Downloader.GetBlob(ctx, name, desc.Digest)
+	body, err := dl.GetBlob(ctx, name, desc.Digest)
 	if err != nil {
 		return nil, err
 	}
