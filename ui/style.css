@@ -331,14 +331,19 @@ tbody tr:hover {
   color: var(--accent-text);
 }
 
-.badge-cloudimg {
+.badge-cloud-image {
   background: var(--green-surface);
   color: var(--green);
 }
 
-.badge-oci {
+.badge-container-image {
   background: var(--amber-surface);
   color: var(--amber);
+}
+
+.badge-unknown {
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
 }
 
 /* Detail grid */

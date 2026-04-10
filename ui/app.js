@@ -43,8 +43,14 @@ function shortMediaType(mt) {
   return mt.replace('application/vnd.cocoon.', '').replace('application/', '');
 }
 
+// badgeKinds mirrors the strings emitted by store.artifactKindString on the
+// server. Anything outside this set falls back to "unknown" so the function
+// is safe to call with raw API values without HTML-escaping.
+const badgeKinds = new Set(['snapshot', 'cloud-image', 'container-image', 'unknown']);
+
 function badgeHTML(type) {
-  return '<span class="badge badge-' + type + '">' + type + '</span>';
+  const safe = badgeKinds.has(type) ? type : 'unknown';
+  return '<span class="badge badge-' + safe + '">' + safe + '</span>';
 }
 
 function enc(s) {
@@ -260,7 +266,7 @@ function repoTable(repos) {
           ${repos.map(r => `
             <tr class="clickable-row" data-repo="${r.name}">
               <td class="cell-name">${r.name}</td>
-              <td>${badgeHTML('snapshot')}</td>
+              <td>${badgeHTML(r.kind || 'unknown')}</td>
               <td><span class="cell-count">${r.tagCount}</span></td>
               <td class="cell-size">${humanSize(r.totalSize)}</td>
               <td class="cell-time">${timeAgo(r.updatedAt)}</td>

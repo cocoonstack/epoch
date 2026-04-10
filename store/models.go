@@ -2,14 +2,19 @@ package store
 
 import "time"
 
-// Repository is a DB repository record.
+// Repository is a DB repository record. ArtifactType / Kind reflect the
+// most recently pushed tag in the repo so the UI can show the artifact
+// flavor (cloud-image / snapshot / container-image) without making a
+// separate per-tag round-trip.
 type Repository struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	TagCount  int       `json:"tagCount"`
-	TotalSize int64     `json:"totalSize"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	TagCount     int       `json:"tagCount"`
+	TotalSize    int64     `json:"totalSize"`
+	ArtifactType string    `json:"artifactType,omitempty"`
+	Kind         string    `json:"kind,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // Tag is a DB tag record. ArtifactType captures the OCI 1.1 manifest
@@ -59,7 +64,7 @@ type Token struct {
 }
 
 func (r *Repository) scanSummary(row rowScanner) error {
-	return row.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize)
+	return row.Scan(&r.ID, &r.Name, &r.CreatedAt, &r.UpdatedAt, &r.TagCount, &r.TotalSize, &r.ArtifactType)
 }
 
 func (t *Tag) scanSummary(row rowScanner) error {
