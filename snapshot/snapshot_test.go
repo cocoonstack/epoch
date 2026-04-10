@@ -369,4 +369,3 @@ func TestPushRequiresName(t *testing.T) {
 		t.Fatal("expected error when name is empty")
 	}
 }
-
