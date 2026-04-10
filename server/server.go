@@ -116,11 +116,11 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	// and the literal segments after it (`/manifests/`, `/blobs/`, `/tags/`)
 	// anchor the match. Routes are registered most-specific first.
 	v2 := s.router.PathPrefix("/v2").Subrouter()
+	v2.StrictSlash(true)
 
 	// OCI Distribution discovery + special endpoints (must come before the
 	// wildcards so the literal segment matches).
 	v2.HandleFunc("/", s.v2Check).Methods(http.MethodGet, http.MethodHead)
-	v2.HandleFunc("", s.v2Check).Methods(http.MethodGet, http.MethodHead)
 	v2.HandleFunc("/_catalog", s.v2Catalog).Methods(http.MethodGet, http.MethodHead)
 	v2.HandleFunc("/token", s.v2Token).Methods(http.MethodGet, http.MethodPost)
 

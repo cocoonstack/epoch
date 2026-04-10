@@ -35,21 +35,24 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 			http.Error(w, "artifact not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		logger.Errorf(r.Context(), err, "fetch manifest %s", name)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	kind, err := manifest.Classify(raw)
+	m, err := manifest.Parse(raw)
 	if err != nil {
-		http.Error(w, "invalid manifest: "+err.Error(), http.StatusInternalServerError)
+		logger.Errorf(r.Context(), err, "parse manifest %s", name)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
+	kind, _ := manifest.Classify(raw)
 	switch kind {
 	case manifest.KindCloudImage:
-		s.streamCloudImage(w, r, name, raw, logger)
+		s.streamCloudImage(w, r, name, m, logger)
 	case manifest.KindSnapshot:
-		s.streamSnapshot(w, r, name, raw, logger)
+		s.streamSnapshot(w, r, name, raw, m, logger)
 	case manifest.KindContainerImage:
 		http.Error(w, "container image — pull via OCI client (oras / crane / docker)", http.StatusMethodNotAllowed)
 	default:
@@ -61,25 +64,25 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 // to w. After WriteHeader we cannot turn an error into an HTTP status; the
 // best we can do is log and stop streaming so the client sees a truncated
 // body.
-func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, raw []byte, logger *log.Fields) {
+func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest, logger *log.Fields) {
 	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.WriteHeader(http.StatusOK)
 
-	if streamErr := cloudimg.Stream(r.Context(), raw, &registryBlobReader{reg: s.reg}, w); streamErr != nil {
+	if streamErr := cloudimg.StreamParsed(r.Context(), m, &registryBlobReader{reg: s.reg}, w); streamErr != nil {
 		logger.Errorf(r.Context(), streamErr, "stream cloud image %s", name)
 	}
 }
 
 // streamSnapshot writes a snapshot manifest as the cocoon-import tar
 // (snapshot.json envelope plus one tar entry per OCI layer). The downloader
-// adapter wraps the in-process registry so snapshot.Stream can fetch the
-// config blob and layer bodies the same way the HTTP-side puller would.
-func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, logger *log.Fields) {
-	w.Header().Set("Content-Type", "application/x-tar")
+// adapter wraps the in-process registry so snapshot.StreamParsed can fetch
+// the config blob and layer bodies the same way the HTTP-side puller would.
+func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest, logger *log.Fields) {
+	w.Header().Set("Content-Type", manifest.MediaTypeTar)
 	w.WriteHeader(http.StatusOK)
 
 	dl := &registryDownloader{reg: s.reg, manifestRaw: raw, manifestName: name}
-	if streamErr := snapshot.Stream(r.Context(), raw, dl, snapshot.StreamOptions{
+	if streamErr := snapshot.StreamParsed(r.Context(), m, dl, snapshot.StreamOptions{
 		Name:   name,
 		Writer: w,
 	}); streamErr != nil {
@@ -109,7 +112,12 @@ func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.Re
 // registryDownloader adapts the in-process *registry.Registry to
 // snapshot.Downloader, the same way registryBlobReader adapts it to
 // cloudimg.BlobReader. It re-serves the already-fetched manifest bytes from
-// memory so snapshot.Stream does not pay for a second S3 round-trip.
+// memory so snapshot.StreamParsed does not pay for a second S3 round-trip.
+//
+// The tag parameter in GetManifest is ignored — the /dl/{name} handler
+// always fetches "latest" before constructing this adapter, and the cached
+// manifestRaw is what StreamParsed will read. If a caller ever needs
+// non-latest, this adapter must be extended to accept and propagate tags.
 type registryDownloader struct {
 	reg          manifestStreamer
 	manifestName string

@@ -90,6 +90,7 @@ func (u *uploadSessions) Start() string {
 func (u *uploadSessions) Append(id string, src io.Reader) (int, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.evictExpiredLocked()
 	sess, ok := u.sessions[id]
 	if !ok {
 		return 0, errUploadNotFound

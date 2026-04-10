@@ -8,24 +8,22 @@ import (
 	"time"
 )
 
-// publicURLEnvVar is the optional override for the absolute URL clients use to
-// reach the server. When set, the WWW-Authenticate realm and the token issuer
-// route are anchored at this URL. When unset, both fall back to constructing
-// the URL from the incoming request, which works as long as the operator has
-// not put a CDN/proxy that rewrites paths in front of the registry.
-const publicURLEnvVar = "EPOCH_PUBLIC_URL"
+const (
+	// publicURLEnvVar is the optional override for the absolute URL clients
+	// use to reach the server. When set, the WWW-Authenticate realm and the
+	// token issuer route are anchored at this URL. When unset, both fall back
+	// to constructing the URL from the incoming request.
+	publicURLEnvVar = "EPOCH_PUBLIC_URL"
 
-// tokenServiceName is the static `service` value advertised in the
-// WWW-Authenticate header. OCI clients echo this back as a `service=` query
-// parameter on their token request, but the issuer does not currently use it
-// for anything beyond logging.
-const tokenServiceName = "epoch"
+	// tokenServiceName is the static `service` value advertised in the
+	// WWW-Authenticate header.
+	tokenServiceName = "epoch"
 
-// tokenLifetimeSeconds is the apparent lifetime returned in the token issuer
-// response. The token itself is the same static value `EPOCH_REGISTRY_TOKEN`
-// the operator configured, so this is purely advisory: clients refetch on
-// expiry but always get the same token back.
-const tokenLifetimeSeconds = 3600
+	// tokenLifetimeSeconds is the apparent lifetime returned in the token
+	// issuer response. Purely advisory: clients refetch on expiry but always
+	// get the same static token back.
+	tokenLifetimeSeconds = 3600
+)
 
 // publicBaseURL returns the absolute base URL clients should use for token
 // fetches. Preference order:

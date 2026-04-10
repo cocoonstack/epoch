@@ -116,10 +116,6 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	if opts.Writer == nil {
 		return errors.New("snapshot stream: Writer is required")
 	}
-	localName := opts.LocalName
-	if localName == "" {
-		localName = opts.Name
-	}
 
 	kind, err := manifest.Classify(raw)
 	if err != nil {
@@ -132,6 +128,24 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	return StreamParsed(ctx, m, dl, opts)
+}
+
+// StreamParsed is the same as [Stream] but accepts an already-parsed manifest.
+// Callers that have already classified and parsed the manifest (e.g. the /dl/
+// handler) use this to avoid a redundant JSON unmarshal.
+func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, opts StreamOptions) error {
+	if opts.Name == "" {
+		return errors.New("snapshot stream: Name is required")
+	}
+	if opts.Writer == nil {
+		return errors.New("snapshot stream: Writer is required")
+	}
+	localName := opts.LocalName
+	if localName == "" {
+		localName = opts.Name
 	}
 
 	cfg, err := fetchSnapshotConfig(ctx, dl, opts.Name, m.Config)
@@ -164,12 +178,12 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 	}
 	envelopeJSON, err := json.MarshalIndent(envelope, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal snapshot envelope: %w", err)
 	}
 	envelopeJSON = append(envelopeJSON, '\n')
 
 	if err := writeTarFile(tw, snapshotJSONName, envelopeJSON, 0o644, now); err != nil {
-		return err
+		return fmt.Errorf("write snapshot envelope: %w", err)
 	}
 
 	for _, layer := range layers {
@@ -198,12 +212,12 @@ func fetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 	}
 	body, err := dl.GetBlob(ctx, name, desc.Digest)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get config blob %s: %w", desc.Digest, err)
 	}
 	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(body, 1<<20)) // config blob is tiny
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config blob: %w", err)
 	}
 	var cfg manifest.SnapshotConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {

@@ -59,6 +59,13 @@ func Stream(ctx context.Context, raw []byte, blobs BlobReader, w io.Writer) erro
 		return err
 	}
 
+	return StreamParsed(ctx, m, blobs, w)
+}
+
+// StreamParsed is the same as [Stream] but accepts an already-parsed manifest.
+// Callers that have already classified and parsed (e.g. the /dl/ handler) use
+// this to avoid a redundant JSON unmarshal on multi-GiB download hot paths.
+func StreamParsed(ctx context.Context, m *manifest.OCIManifest, blobs BlobReader, w io.Writer) error {
 	disks := diskLayers(m.Layers)
 	if len(disks) == 0 {
 		return errors.New("cloud image manifest has no disk layers")

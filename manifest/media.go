@@ -70,6 +70,7 @@ const (
 	MediaTypeVMCidata = "application/vnd.cocoonstack.vm.cidata"
 
 	MediaTypeGeneric = "application/octet-stream"
+	MediaTypeTar     = "application/x-tar"
 
 	// --- OCI standard annotation keys ---
 

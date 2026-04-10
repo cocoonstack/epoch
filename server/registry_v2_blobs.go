@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/cocoonstack/epoch/manifest"
 )
 
 // GET /v2/{name}/blobs/{digest}
@@ -21,7 +23,7 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = body.Close() }()
 
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+dgst)
 	if size >= 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
@@ -44,7 +46,7 @@ func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.Header().Set("Docker-Content-Digest", "sha256:"+dgst)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
