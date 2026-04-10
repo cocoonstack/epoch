@@ -20,9 +20,10 @@ import (
 // pass. The 40 GiB default is many orders of magnitude below that ceiling.
 //
 // uploadCopyBufSize is the io.CopyBuffer scratch size used for streaming
-// chunk bodies into the session tempfile. *os.File does not implement
-// ReaderFrom/WriterTo, so io.Copy would fall through to its 32 KiB default
-// — millions of syscalls per multi-GiB layer. 1 MiB cuts that ~32x.
+// chunk bodies into the session tempfile. The source is an io.LimitReader
+// wrapping the HTTP request body, which does not forward WriterTo, so
+// io.Copy would fall through to its 32 KiB default — millions of syscalls
+// per multi-GiB layer. A 1 MiB buffer cuts that ~32x.
 const (
 	defaultUploadMaxBytes = int64(40) << 30 // 40 GiB per session
 	defaultUploadTTL      = time.Hour

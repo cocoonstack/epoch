@@ -30,6 +30,11 @@ import (
 	"github.com/cocoonstack/epoch/ui"
 )
 
+// defaultUploadSpoolDir is where in-progress chunked OCI uploads are spooled
+// when EPOCH_UPLOAD_DIR is not set. It must be backed by real disk — see
+// resolveUploadDir for the rationale.
+const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
+
 // Server is the Epoch HTTP server.
 type Server struct {
 	reg           *registry.Registry
@@ -41,11 +46,6 @@ type Server struct {
 	uploads       *uploadSessions
 	uiHandler     http.Handler
 }
-
-// defaultUploadSpoolDir is where in-progress chunked OCI uploads are spooled
-// when EPOCH_UPLOAD_DIR is not set. It must be backed by real disk — see
-// resolveUploadDir for the rationale.
-const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
 
 // New creates a new server.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {

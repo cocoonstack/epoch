@@ -46,17 +46,12 @@ type BlobReader interface {
 // Stream returns an error if the manifest is not classified as a cloud image
 // or contains zero disk layers.
 func Stream(ctx context.Context, raw []byte, blobs BlobReader, w io.Writer) error {
-	kind, err := manifest.Classify(raw)
-	if err != nil {
-		return fmt.Errorf("classify manifest: %w", err)
-	}
-	if kind != manifest.KindCloudImage {
-		return fmt.Errorf("manifest is %s, not a cloud image", kind)
-	}
-
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		return err
+	}
+	if kind := manifest.ClassifyParsed(m); kind != manifest.KindCloudImage {
+		return fmt.Errorf("manifest is %s, not a cloud image", kind)
 	}
 
 	return StreamParsed(ctx, m, blobs, w)

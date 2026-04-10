@@ -179,7 +179,7 @@ func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) 
 		return nil, err
 	}
 	digestPrefix := "manifests/" + name + "/_digests/"
-	var tags []string
+	tags := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if strings.HasPrefix(k, digestPrefix) {
 			continue

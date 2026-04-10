@@ -47,8 +47,7 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	kind, _ := manifest.Classify(raw)
-	switch kind {
+	switch manifest.ClassifyParsed(m) {
 	case manifest.KindCloudImage:
 		s.streamCloudImage(w, r, name, m, logger)
 	case manifest.KindSnapshot:

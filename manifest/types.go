@@ -114,25 +114,35 @@ func Classify(raw []byte) (Kind, error) {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return KindUnknown, fmt.Errorf("classify manifest: %w", err)
 	}
+	return classifyFields(probe.ArtifactType, probe.Config.MediaType, probe.MediaType), nil
+}
 
-	switch probe.ArtifactType {
+// ClassifyParsed returns the artifact kind of an already-parsed manifest.
+// Callers that have already called [Parse] use this to avoid a second JSON
+// unmarshal of the same bytes. The ordering of authority matches [Classify].
+func ClassifyParsed(m *OCIManifest) Kind {
+	return classifyFields(m.ArtifactType, m.Config.MediaType, m.MediaType)
+}
+
+func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
+	switch artifactType {
 	case ArtifactTypeOSImage, ArtifactTypeWindowsImage:
-		return KindCloudImage, nil
+		return KindCloudImage
 	case ArtifactTypeSnapshot:
-		return KindSnapshot, nil
+		return KindSnapshot
 	}
 
-	switch probe.Config.MediaType {
+	switch configMediaType {
 	case MediaTypeOCIImageConfig, MediaTypeDockerConfig:
-		return KindContainerImage, nil
+		return KindContainerImage
 	}
 
-	switch probe.MediaType {
+	switch topMediaType {
 	case MediaTypeOCIIndex, MediaTypeDockerIndex:
-		return KindContainerImage, nil
+		return KindContainerImage
 	}
 
-	return KindUnknown, nil
+	return KindUnknown
 }
 
 // SnapshotConfig is the JSON shape of the config blob referenced by a snapshot

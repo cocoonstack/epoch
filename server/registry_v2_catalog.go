@@ -2,7 +2,9 @@ package server
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 )
 
 // GET /v2/
@@ -39,11 +41,7 @@ func (s *Server) v2Catalog(w http.ResponseWriter, r *http.Request) {
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	names := make([]string, 0, len(cat.Repositories))
-	for name := range cat.Repositories {
-		names = append(names, name)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"repositories": names})
+	writeJSON(w, http.StatusOK, map[string]any{"repositories": slices.Sorted(maps.Keys(cat.Repositories))})
 }
 
 // GET /v2/{name}/tags/list
@@ -62,10 +60,7 @@ func (s *Server) v2TagsList(w http.ResponseWriter, r *http.Request) {
 			v2Error(w, http.StatusNotFound, "NAME_UNKNOWN", fmt.Sprintf("repository %q not found", name))
 			return
 		}
-		tags = make([]string, 0, len(repo.Tags))
-		for t := range repo.Tags {
-			tags = append(tags, t)
-		}
+		tags = slices.Sorted(maps.Keys(repo.Tags))
 	}
 	if tags == nil {
 		tags = []string{}

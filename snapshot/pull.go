@@ -117,17 +117,12 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 		return errors.New("snapshot stream: writer is required")
 	}
 
-	kind, err := manifest.Classify(raw)
-	if err != nil {
-		return fmt.Errorf("classify manifest: %w", err)
-	}
-	if kind != manifest.KindSnapshot {
-		return fmt.Errorf("manifest is %s, not a snapshot", kind)
-	}
-
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("parse manifest: %w", err)
+	}
+	if kind := manifest.ClassifyParsed(m); kind != manifest.KindSnapshot {
+		return fmt.Errorf("manifest is %s, not a snapshot", kind)
 	}
 
 	return StreamParsed(ctx, m, dl, opts)

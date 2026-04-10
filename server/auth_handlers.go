@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -184,15 +185,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
 	hd := strings.ToLower(userHD)
 	emailLower := strings.ToLower(email)
-	for _, d := range allowed {
-		if hd != "" && hd == d {
-			return true
-		}
-		if strings.HasSuffix(emailLower, "@"+d) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(allowed, func(d string) bool {
+		return (hd != "" && hd == d) || strings.HasSuffix(emailLower, "@"+d)
+	})
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

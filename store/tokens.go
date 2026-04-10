@@ -48,6 +48,9 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 		}
 		tokens = append(tokens, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate tokens: %w", err)
+	}
 	if tokens == nil {
 		tokens = []Token{}
 	}
@@ -64,7 +67,7 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	hash := utils.SHA256Hex([]byte(plaintext))
 
 	if entry, ok := s.tokenCache.Load(hash); ok {
-		if ce := entry.(tokenCacheEntry); time.Now().Before(ce.expires) {
+		if ce, ok := entry.(tokenCacheEntry); ok && time.Now().Before(ce.expires) {
 			return ce.valid
 		}
 	}
@@ -94,7 +97,7 @@ func (s *Store) startTokenCacheCleanup(ctx context.Context) {
 			case <-ticker.C:
 				now := time.Now()
 				s.tokenCache.Range(func(key, value any) bool {
-					if now.After(value.(tokenCacheEntry).expires) {
+					if ce, ok := value.(tokenCacheEntry); ok && now.After(ce.expires) {
 						s.tokenCache.Delete(key)
 					}
 					return true

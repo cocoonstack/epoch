@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -31,12 +32,9 @@ func isPublicPath(path string) bool {
 	if publicExactPaths[path] {
 		return true
 	}
-	for _, p := range publicPathPrefixes {
-		if strings.HasPrefix(path, p) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(publicPathPrefixes, func(p string) bool {
+		return strings.HasPrefix(path, p)
+	})
 }
 
 // isV2WriteMethod returns true for HTTP methods that mutate /v2/ state.
