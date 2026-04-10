@@ -14,6 +14,12 @@ KillMode=process
 Restart=always
 RestartSec=5s
 LimitNOFILE=65536
+# Disk-backed spool for in-progress chunked OCI uploads. Must NOT be tmpfs
+# — see resolveUploadDir in server/server.go. systemd creates this under
+# /var/cache/epoch/ owned by the service user.
+CacheDirectory=epoch
+CacheDirectoryMode=0700
+Environment=EPOCH_UPLOAD_DIR=/var/cache/epoch/uploads
 
 [Install]
 WantedBy=multi-user.target

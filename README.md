@@ -172,6 +172,21 @@ make build          # produces ./epoch
 - Set `SSO_PROVIDER=google` or `SSO_PROVIDER=oidc` to enable session-based login
 - See [epoch-server.yaml](epoch-server.yaml) for the full list of SSO variables
 
+### Upload spool
+
+In-progress chunked OCI uploads are spooled to disk so multi-GiB layers do
+not pin RAM. The directory MUST be backed by real disk — `tmpfs` (the
+default `/tmp` on most systemd hosts) defeats the spool and will OOM the
+host on big pushes.
+
+| Variable | Description |
+|---|---|
+| `EPOCH_UPLOAD_DIR` | Spool directory (default `/var/cache/epoch/uploads`; falls back to `os.TempDir()` with a loud warning if neither is creatable) |
+
+The bundled `epoch-server.service` already sets `CacheDirectory=epoch` and
+exports `EPOCH_UPLOAD_DIR=/var/cache/epoch/uploads`, so systemd deploys are
+configured out of the box.
+
 ### Deployment files
 
 | Path | Purpose |

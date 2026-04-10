@@ -42,6 +42,11 @@ type Server struct {
 	uiHandler     http.Handler
 }
 
+// defaultUploadSpoolDir is where in-progress chunked OCI uploads are spooled
+// when EPOCH_UPLOAD_DIR is not set. It must be backed by real disk — see
+// resolveUploadDir for the rationale.
+const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
+
 // New creates a new server.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
 	logger := log.WithFunc("server.New")
@@ -62,10 +67,40 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 		router:        mux.NewRouter(),
 		sso:           sso,
 		registryToken: regToken,
-		uploads:       newUploadSessions(),
+		uploads:       newUploadSessions(resolveUploadDir(ctx)),
 	}
 	s.setupRoutes(ctx)
 	return s
+}
+
+// resolveUploadDir picks the directory used to spool in-progress chunked OCI
+// uploads. Order of preference:
+//
+//  1. $EPOCH_UPLOAD_DIR if set and creatable.
+//  2. defaultUploadSpoolDir (/var/cache/epoch/uploads) if creatable.
+//  3. os.TempDir() with a loud warning — operators should fix the deploy.
+//
+// The directory MUST be backed by real disk. The default os.TempDir() on
+// systemd hosts is often a tmpfs that lives in RAM, which would defeat the
+// disk-backed upload session refactor and OOM the host on multi-GiB pushes.
+// We log the chosen directory so operators can sanity-check it at boot.
+func resolveUploadDir(ctx context.Context) string {
+	logger := log.WithFunc("server.resolveUploadDir")
+	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			logger.Warnf(ctx, "upload spool dir %q not usable, trying next: %v", dir, err)
+			continue
+		}
+		logger.Infof(ctx, "upload spool dir: %s", dir)
+		return dir
+	}
+	fallback := os.TempDir()
+	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
+	return fallback
 }
 
 // ListenAndServe starts the server with initial sync and background sync.

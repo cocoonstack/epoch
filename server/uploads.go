@@ -1,25 +1,32 @@
 package server
 
 import (
-	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-// Constants governing in-memory blob upload sessions used by the OCI push
+// Constants governing disk-backed blob upload sessions used by the OCI push
 // flow. The defaults are conservative; tests use shorter values via the
 // configurable fields on uploadSessions.
 //
 // Note: maxBytes must stay below math.MaxInt64-1 because Append uses
 // `remaining+1` as the LimitReader cap to detect overflow without a second
-// pass. The 20 GiB default is many orders of magnitude below that ceiling.
+// pass. The 40 GiB default is many orders of magnitude below that ceiling.
+//
+// uploadCopyBufSize is the io.CopyBuffer scratch size used for streaming
+// chunk bodies into the session tempfile. *os.File does not implement
+// ReaderFrom/WriterTo, so io.Copy would fall through to its 32 KiB default
+// — millions of syscalls per multi-GiB layer. 1 MiB cuts that ~32x.
 const (
-	defaultUploadMaxBytes = int64(20) << 30 // 20 GiB per session
+	defaultUploadMaxBytes = int64(40) << 30 // 40 GiB per session
 	defaultUploadTTL      = time.Hour
+	uploadCopyBufSize     = 1 << 20 // 1 MiB
 )
 
 var (
@@ -30,6 +37,46 @@ var (
 	errUploadTooLarge = errors.New("upload session exceeded size cap")
 )
 
+// FinalizedUpload owns the tempfile holding a finalized upload session.
+// Callers MUST Close it after digest verification + persisting; that is the
+// only way the underlying tempfile gets removed from disk.
+type FinalizedUpload struct {
+	file *os.File
+	size int64
+}
+
+// Size returns the total bytes accumulated by the session.
+func (f *FinalizedUpload) Size() int64 { return f.size }
+
+// Reader rewinds the underlying tempfile to offset 0 and returns it as an
+// io.Reader. Safe to call multiple times — the digest-verify pass and the
+// upload-to-S3 pass each call Reader once and stream the same file twice
+// without copying its contents into memory.
+func (f *FinalizedUpload) Reader() (io.Reader, error) {
+	if f.file == nil {
+		return nil, errors.New("finalized upload already closed")
+	}
+	if _, err := f.file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind upload tempfile: %w", err)
+	}
+	return f.file, nil
+}
+
+// Close removes the underlying tempfile. Idempotent.
+func (f *FinalizedUpload) Close() error {
+	if f.file == nil {
+		return nil
+	}
+	name := f.file.Name()
+	closeErr := f.file.Close()
+	f.file = nil
+	rmErr := os.Remove(name)
+	if closeErr != nil {
+		return closeErr
+	}
+	return rmErr
+}
+
 // uploadSessions tracks in-progress OCI blob uploads.
 //
 // The OCI Distribution spec lets clients push a blob in two ways:
@@ -37,57 +84,78 @@ var (
 //   - Chunked: POST .../uploads/ → PATCH ... → ... → PUT ...
 //
 // Chunked uploads need server-side state (the partial body) between requests.
-// We buffer that state in memory: chunked uploads are uncommon and OCI image
-// layers are typically a few hundred MB, so a per-session cap plus TTL-based
-// eviction is enough to bound memory without persistence.
+// We persist that state to a per-session tempfile so multi-GiB OCI layers do
+// not pin RAM. A per-session size cap and TTL-based eviction bound disk use.
+//
+// IMPORTANT: dir must point at a directory backed by real disk. The default
+// os.TempDir() on systemd hosts is often a tmpfs, which would defeat the
+// whole point of this refactor and OOM the host on multi-GiB pushes. The
+// caller (server.New) is responsible for picking a sensible directory; tests
+// pass t.TempDir().
 //
 // uploadSessions is safe for concurrent use.
 type uploadSessions struct {
 	mu       sync.Mutex
 	sessions map[string]*uploadSession
+	dir      string
 	maxBytes int64
 	ttl      time.Duration
 	now      func() time.Time // injectable for tests
 }
 
 type uploadSession struct {
-	buf       bytes.Buffer
+	file      *os.File
+	size      int64
 	createdAt time.Time
+	poisoned  bool // true after a failed rollback; subsequent appends rejected
 }
 
-func newUploadSessions() *uploadSessions {
+// newUploadSessions returns an upload session tracker that spools tempfiles
+// into dir. dir must already exist and be writable.
+func newUploadSessions(dir string) *uploadSessions {
 	return &uploadSessions{
 		sessions: make(map[string]*uploadSession),
+		dir:      dir,
 		maxBytes: defaultUploadMaxBytes,
 		ttl:      defaultUploadTTL,
 		now:      time.Now,
 	}
 }
 
-// Start creates a new upload session and returns its ID. Stale sessions
-// (older than ttl) are swept first so abandoned uploads cannot pin memory.
-func (u *uploadSessions) Start() string {
+// Start creates a new upload session backed by a tempfile and returns its ID.
+// Stale sessions (older than ttl) are swept first so abandoned uploads cannot
+// pin disk space.
+func (u *uploadSessions) Start() (string, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.evictExpiredLocked()
+
+	f, err := os.CreateTemp(u.dir, "epoch-upload-*.bin")
+	if err != nil {
+		return "", fmt.Errorf("create upload tempfile: %w", err)
+	}
 	id := uuid.NewString()
-	u.sessions[id] = &uploadSession{createdAt: u.now()}
-	return id
+	u.sessions[id] = &uploadSession{file: f, createdAt: u.now()}
+	return id, nil
 }
 
-// Append streams data into the session's buffer and returns the new buffer
-// size after the append. On any error (read failure or over-cap) the buffer
-// is rolled back to its pre-Append length and the returned size reflects the
-// pre-Append state — failed appends are all-or-nothing.
+// Append streams data into the session's tempfile and returns the new total
+// size after the append. On any error (read failure or over-cap) the file is
+// truncated back to its pre-Append length and the file pointer is rewound, so
+// failed appends are all-or-nothing.
+//
+// If the rollback itself fails (truncate or seek error) the session is
+// poisoned and removed from the active map — its tempfile would otherwise be
+// in an indeterminate state and any subsequent append could corrupt the blob.
 //
 // The reader is consumed via a LimitReader with a cap of remaining+1 so an
 // over-cap upload is detected without a second pass over the data. An empty
 // reader at exactly the cap is a no-op success (OCI clients can legally send
 // a final PUT with no body).
 //
-// Returns errUploadNotFound for unknown sessions and errUploadTooLarge when
-// the append would exceed maxBytes.
-func (u *uploadSessions) Append(id string, src io.Reader) (int, error) {
+// Returns errUploadNotFound for unknown (or poisoned-and-evicted) sessions
+// and errUploadTooLarge when the append would exceed maxBytes.
+func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.evictExpiredLocked()
@@ -95,23 +163,40 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int, error) {
 	if !ok {
 		return 0, errUploadNotFound
 	}
-	startLen := sess.buf.Len()
-	remaining := u.maxBytes - int64(startLen)
-	n, err := sess.buf.ReadFrom(io.LimitReader(src, remaining+1))
-	if err != nil {
-		sess.buf.Truncate(startLen)
-		return startLen, err
+	startSize := sess.size
+	remaining := u.maxBytes - startSize
+	scratch := make([]byte, uploadCopyBufSize)
+	n, copyErr := io.CopyBuffer(sess.file, io.LimitReader(src, remaining+1), scratch)
+	if copyErr != nil {
+		if rbErr := sess.rollback(startSize); rbErr != nil {
+			u.poisonLocked(id, sess)
+			return startSize, errors.Join(copyErr, rbErr)
+		}
+		return startSize, copyErr
 	}
 	if n > remaining {
-		sess.buf.Truncate(startLen)
-		return startLen, errUploadTooLarge
+		if rbErr := sess.rollback(startSize); rbErr != nil {
+			u.poisonLocked(id, sess)
+			return startSize, errors.Join(errUploadTooLarge, rbErr)
+		}
+		return startSize, errUploadTooLarge
 	}
-	return sess.buf.Len(), nil
+	sess.size = startSize + n
+	return sess.size, nil
 }
 
-// Finalize removes the session and returns its accumulated buffer. The
-// caller is responsible for verifying the digest and persisting the bytes.
-func (u *uploadSessions) Finalize(id string) ([]byte, error) {
+// poisonLocked evicts a session whose tempfile is in an indeterminate state
+// after a failed rollback. Caller must hold u.mu.
+func (u *uploadSessions) poisonLocked(id string, sess *uploadSession) {
+	sess.poisoned = true
+	delete(u.sessions, id)
+	closeUploadFile(sess.file)
+}
+
+// Finalize removes the session from the active map and returns its tempfile
+// wrapped in a FinalizedUpload. The caller is responsible for digest
+// verification, persisting the bytes, and Close()-ing.
+func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	sess, ok := u.sessions[id]
@@ -119,15 +204,18 @@ func (u *uploadSessions) Finalize(id string) ([]byte, error) {
 		return nil, errUploadNotFound
 	}
 	delete(u.sessions, id)
-	return sess.buf.Bytes(), nil
+	return &FinalizedUpload{file: sess.file, size: sess.size}, nil
 }
 
-// Cancel removes the session without returning its data. Used when a client
-// abandons an upload (and exposed for tests).
+// Cancel removes the session and deletes the underlying tempfile. Used when a
+// client abandons an upload (and exposed for tests).
 func (u *uploadSessions) Cancel(id string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	delete(u.sessions, id)
+	if sess, ok := u.sessions[id]; ok {
+		delete(u.sessions, id)
+		closeUploadFile(sess.file)
+	}
 }
 
 // Len returns the number of live sessions. Test-only helper.
@@ -137,12 +225,40 @@ func (u *uploadSessions) Len() int {
 	return len(u.sessions)
 }
 
-// evictExpiredLocked drops sessions whose age exceeds ttl. Caller must hold u.mu.
+// evictExpiredLocked drops sessions whose age exceeds ttl and removes their
+// tempfiles. Caller must hold u.mu.
 func (u *uploadSessions) evictExpiredLocked() {
 	cutoff := u.now().Add(-u.ttl)
 	for id, sess := range u.sessions {
 		if sess.createdAt.Before(cutoff) {
 			delete(u.sessions, id)
+			closeUploadFile(sess.file)
 		}
 	}
+}
+
+// rollback truncates the session's tempfile back to startSize and rewinds
+// the write offset, restoring the all-or-nothing append contract. Caller
+// must hold u.mu (the only operation here is on s.file which is also under
+// u.mu in practice).
+func (s *uploadSession) rollback(startSize int64) error {
+	if err := s.file.Truncate(startSize); err != nil {
+		return fmt.Errorf("truncate upload tempfile: %w", err)
+	}
+	if _, err := s.file.Seek(startSize, io.SeekStart); err != nil {
+		return fmt.Errorf("seek upload tempfile: %w", err)
+	}
+	return nil
+}
+
+// closeUploadFile releases a session-owned tempfile. Errors are swallowed
+// because there is no useful caller — failures here only leak disk space, not
+// correctness.
+func closeUploadFile(f *os.File) {
+	if f == nil {
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
 }

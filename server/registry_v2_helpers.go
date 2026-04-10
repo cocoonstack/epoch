@@ -30,6 +30,14 @@ func stripSHA256Prefix(s string) string {
 	return strings.TrimPrefix(s, "sha256:")
 }
 
+// isDigestRef reports whether an OCI manifest reference is a content digest
+// (e.g. `sha256:abc...`) rather than a tag. The single source of truth for
+// every site that needs to branch on "is this a tag or a digest" — keeps
+// the definition consistent if we ever add sha512: support.
+func isDigestRef(ref string) bool {
+	return strings.HasPrefix(ref, "sha256:")
+}
+
 func isNotFound(err error) bool {
 	return errors.Is(err, objectstore.ErrNotFound)
 }

@@ -129,12 +129,8 @@ func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string
 // digest write happens first (it is idempotent and content-addressed), so a
 // failure between writes leaves no dangling tag pointer.
 func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data []byte) error {
-	h := sha256.Sum256(data)
-	digest := "sha256:" + hex.EncodeToString(h[:])
-
-	digestKey := manifestDigestKey(name, digest)
-	if err := r.client.Put(ctx, digestKey, bytes.NewReader(data), int64(len(data))); err != nil {
-		return fmt.Errorf("upload manifest %s@%s: %w", name, digest, err)
+	if _, err := r.PushManifestJSONByDigest(ctx, name, data); err != nil {
+		return err
 	}
 
 	tagKey := manifestKey(name, tag)
@@ -142,6 +138,26 @@ func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data 
 		return fmt.Errorf("upload manifest %s:%s: %w", name, tag, err)
 	}
 	return r.updateCatalog(ctx, name, tag)
+}
+
+// PushManifestJSONByDigest stores a manifest under its content digest only.
+// Unlike PushManifestJSON it neither writes a tag entry nor touches the
+// catalog: by-digest pushes are how OCI clients pre-load child manifests of
+// a multi-arch image index before pushing the index itself by tag, and
+// recording each child as a tag would pollute the catalog with sha256:*
+// entries that are not user-visible references.
+//
+// Returns the computed `sha256:<hex>` digest so the caller can echo it in
+// the response and verify it against a digest reference if present.
+func (r *Registry) PushManifestJSONByDigest(ctx context.Context, name string, data []byte) (string, error) {
+	h := sha256.Sum256(data)
+	digest := "sha256:" + hex.EncodeToString(h[:])
+
+	digestKey := manifestDigestKey(name, digest)
+	if err := r.client.Put(ctx, digestKey, bytes.NewReader(data), int64(len(data))); err != nil {
+		return "", fmt.Errorf("upload manifest %s@%s: %w", name, digest, err)
+	}
+	return digest, nil
 }
 
 // DeleteManifest removes a manifest tag and updates the catalog. The

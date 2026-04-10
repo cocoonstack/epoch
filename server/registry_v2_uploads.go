@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -30,7 +29,11 @@ func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := s.uploads.Start()
+	id, err := s.uploads.Start()
+	if err != nil {
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
 	w.Header().Set("Location", uploadLocation(name, id))
 	w.Header().Set("Docker-Upload-UUID", id)
 	w.Header().Set("Range", "0-0")
@@ -53,14 +56,15 @@ func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", uploadLocation(name, id))
 	w.Header().Set("Docker-Upload-UUID", id)
-	w.Header().Set("Range", "0-"+strconv.Itoa(size-1))
+	w.Header().Set("Range", "0-"+strconv.FormatInt(size-1, 10))
 	w.WriteHeader(http.StatusAccepted)
 }
 
 // v2CompleteBlobUpload handles `PUT /v2/{name}/blobs/uploads/{uuid}?digest=sha256:xxx`.
-// Any trailing body is appended, the assembled buffer is digest-verified, and
-// the blob is persisted. The session is removed on every error path so an
-// abandoned or failed upload does not pin memory.
+// Any trailing body is appended, the assembled tempfile is digest-verified
+// via a streaming pass, and the blob is then streamed to the object store.
+// The session is removed on every error path so an abandoned or failed
+// upload does not pin disk space.
 func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	id := urlVar(r, "uuid")
@@ -82,42 +86,79 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := s.uploads.Finalize(id)
+	// Finalize transfers tempfile ownership to fu under u.mu, so the only
+	// possible error here is errUploadNotFound — which means the session was
+	// already evicted (TTL or rollback poisoning) and there is nothing left
+	// to clean up.
+	fu, err := s.uploads.Finalize(id)
+	if err != nil {
+		writeUploadAppendError(w, err)
+		return
+	}
+	defer func() { _ = fu.Close() }()
+
+	s.persistVerifiedBlob(w, r, name, digest, fu)
+}
+
+// persistMonolithicUpload handles the single-POST flow where the entire blob
+// arrives in the body of `POST .../uploads/?digest=...`. It re-uses the
+// upload session machinery so the body streams to a tempfile rather than
+// being held in RAM.
+func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
+	id, err := s.uploads.Start()
+	if err != nil {
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	body := io.LimitReader(r.Body, uploadBodyLimit)
+	if _, appendErr := s.uploads.Append(id, body); appendErr != nil {
+		drainBody(body)
+		s.uploads.Cancel(id)
+		writeUploadAppendError(w, appendErr)
+		return
+	}
+	// Finalize can only return errUploadNotFound, which here means rollback
+	// poisoning evicted the session — the tempfile is already gone, so no
+	// extra Cancel is needed.
+	fu, err := s.uploads.Finalize(id)
 	if err != nil {
 		drainBody(body)
 		writeUploadAppendError(w, err)
 		return
 	}
+	defer func() { _ = fu.Close() }()
 
-	s.persistVerifiedBlob(w, r, name, digest, data)
+	s.persistVerifiedBlob(w, r, name, digest, fu)
 }
 
-// persistMonolithicUpload handles the single-POST flow where the entire blob
-// arrives in the body of `POST .../uploads/?digest=...`. No session state is
-// involved.
-func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
-	body := io.LimitReader(r.Body, uploadBodyLimit)
-	data, err := io.ReadAll(body)
+// persistVerifiedBlob is the shared finalize step for both push flows. It
+// makes two streaming passes over the upload tempfile: first to verify the
+// SHA-256 matches the declared digest, second to stream the bytes to the
+// object store. Neither pass copies the blob into memory.
+func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, name, digest string, fu *FinalizedUpload) {
+	rdr, err := fu.Reader()
 	if err != nil {
-		drainBody(body)
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
-	s.persistVerifiedBlob(w, r, name, digest, data)
-}
-
-// persistVerifiedBlob is the shared finalize step for both push flows.
-// Verifies the digest matches the bytes, then writes through to the registry.
-func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, name, digest string, data []byte) {
-	sum := sha256.Sum256(data)
-	got := "sha256:" + hex.EncodeToString(sum[:])
+	h := sha256.New()
+	if _, hashErr := io.Copy(h, rdr); hashErr != nil {
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "hash upload: "+hashErr.Error())
+		return
+	}
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
 	if got != digest {
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
 			fmt.Sprintf("digest mismatch: got %s, expected %s", got, digest))
 		return
 	}
 
-	if err := s.reg.PushBlobFromStream(r.Context(), stripSHA256Prefix(digest), bytes.NewReader(data), int64(len(data))); err != nil {
+	rdr, err = fu.Reader()
+	if err != nil {
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if err := s.reg.PushBlobFromStream(r.Context(), stripSHA256Prefix(digest), rdr, fu.Size()); err != nil {
 		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_INVALID", err.Error())
 		return
 	}

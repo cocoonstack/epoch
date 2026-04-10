@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/cocoonstack/epoch/utils"
 )
@@ -19,7 +18,7 @@ const manifestBodyLimit = 50 << 20
 // when the reference is `sha256:...` and the by-tag path otherwise. This keeps
 // the GET/HEAD handlers from open-coding the same branch twice.
 func (s *Server) loadManifestRaw(r *http.Request, name, ref string) ([]byte, error) {
-	if strings.HasPrefix(ref, "sha256:") {
+	if isDigestRef(ref) {
 		return s.reg.ManifestJSONByDigest(r.Context(), name, ref)
 	}
 	return s.reg.ManifestJSON(r.Context(), name, ref)
@@ -116,8 +115,15 @@ func (s *Server) v2DeleteManifest(w http.ResponseWriter, r *http.Request) {
 // Accepts any well-formed JSON manifest: OCI image manifest, OCI image index,
 // Docker manifest v2 / list, or a cocoonstack snapshot/cloudimg artifact.
 // Validation is intentionally minimal — the registry stores the bytes
-// verbatim and clients re-fetch them unchanged. The registry layer is
-// responsible for the dual tag/digest write.
+// verbatim and clients re-fetch them unchanged.
+//
+// When the reference is a content digest (`sha256:...`) the manifest is
+// stored under its by-digest key only and the catalog is NOT touched. OCI
+// clients pre-load the child manifests of a multi-arch image index this way
+// before pushing the index itself by tag, and recording each child as a tag
+// would litter the catalog with sha256:* "tags" that are not real names.
+// Per the OCI Distribution spec the body's digest must match the reference;
+// a mismatch is rejected with DIGEST_INVALID.
 func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	ref := urlVar(r, "reference")
@@ -132,12 +138,25 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.reg.PushManifestJSON(r.Context(), name, ref, data); err != nil {
-		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		return
+	digest := "sha256:" + utils.SHA256Hex(data)
+
+	if isDigestRef(ref) {
+		if ref != digest {
+			v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
+				fmt.Sprintf("manifest digest %s does not match reference %s", digest, ref))
+			return
+		}
+		if _, err := s.reg.PushManifestJSONByDigest(r.Context(), name, data); err != nil {
+			v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
+	} else {
+		if err := s.reg.PushManifestJSON(r.Context(), name, ref, data); err != nil {
+			v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+			return
+		}
 	}
 
-	digest := "sha256:" + utils.SHA256Hex(data)
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, ref))
 	w.WriteHeader(http.StatusCreated)
