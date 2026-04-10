@@ -35,6 +35,21 @@ var errSyncInProgress = errors.New("sync already in progress")
 // into MySQL. Each tag's manifest is parsed as OCI and indexed by digest,
 // artifactType, and aggregate size. Orphaned rows (repos / tags that no
 // longer appear in the catalog) are deleted in a second pass.
+//
+// Sync is split into two phases so the write transaction never holds while
+// epoch is talking to remote object storage:
+//
+//  1. prepareSync — read existing tag state from MySQL, fetch + parse +
+//     aggregate every catalog tag from the registry. No write TX is open,
+//     so the seconds spent on S3 round-trips do not block concurrent
+//     writers (token last_used updates, tag deletes, etc).
+//  2. commitSync — open one short write TX and upsert every prepared
+//     repo / tag / blob. The lock window stays in milliseconds even when
+//     phase 1 took seconds.
+//
+// Per-tag failures stay non-fatal so one bad manifest does not abort the
+// whole pass. Context cancellation during phase 1 aborts the pass before
+// any writes are issued.
 func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) error {
 	if !s.mu.TryLock() {
 		return errSyncInProgress
@@ -52,30 +67,12 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 
 	logger := log.WithFunc("store.SyncFromCatalog")
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	pending, err := s.prepareSync(ctx, cat, reg, logger)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	for repoName, repo := range cat.Repositories {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		repoID, err := upsertRepositoryTx(ctx, tx, repoName)
-		if err != nil {
-			logger.Warnf(ctx, "upsert repo %s: %v", repoName, err)
-			continue
-		}
-		for _, tagName := range slices.Sorted(maps.Keys(repo.Tags)) {
-			if err := s.syncTag(ctx, tx, reg, repoID, repoName, tagName); err != nil {
-				logger.Warnf(ctx, "sync tag %s:%s: %v", repoName, tagName, err)
-			}
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+	if err := s.commitSync(ctx, pending, logger); err != nil {
+		return err
 	}
 
 	s.cleanOrphans(ctx, cat)
@@ -83,22 +80,50 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	return nil
 }
 
-// syncTag fetches a single manifest from the registry, parses it, and writes
-// the tag + its blob descriptors into the SQL transaction. For OCI image
-// indexes the function recurses into each child manifest so the aggregated
-// totalSize / layerCount / blobs row reflect the whole multi-arch artifact,
-// not just the index envelope (which has no layers of its own).
-func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry, repoID int64, repoName, tagName string) error {
-	logger := log.WithFunc("store.syncTag")
+// pendingTag is the in-memory result of [prepareSync] — everything
+// [commitSync] needs to upsert one tag without doing any further remote I/O.
+type pendingTag struct {
+	repoName    string
+	tag         Tag
+	descriptors []manifest.Descriptor
+}
 
-	existing, dbErr := s.getTagSyncState(ctx, repoID, tagName)
+// prepareSync iterates the catalog and produces one [pendingTag] per
+// (repo, tag) that actually needs to be written. Unchanged tags (digest
+// matches the cached row and no platform_sizes backfill is owed) are
+// filtered out here so commitSync's TX stays minimal. No DB writes happen
+// in this phase — the only DB touch is the per-tag read in getTagSyncState.
+func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry, logger *log.Fields) ([]pendingTag, error) {
+	var pending []pendingTag
+	for repoName, repo := range cat.Repositories {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for _, tagName := range slices.Sorted(maps.Keys(repo.Tags)) {
+			p, ok := s.prepareTag(ctx, reg, repoName, tagName, logger)
+			if !ok {
+				continue
+			}
+			pending = append(pending, p)
+		}
+	}
+	return pending, nil
+}
+
+// prepareTag fetches a single manifest, parses it, and aggregates the
+// totals. Returns ok=false when the tag is unchanged (fast path) or when
+// fetching / parsing failed and was already logged. Lives entirely outside
+// any TX so its remote round-trips do not hold a database lock.
+func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName, tagName string, logger *log.Fields) (pendingTag, bool) {
+	existing, dbErr := s.getTagSyncState(ctx, repoName, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
 		logger.Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
 	}
 
 	raw, err := reg.ManifestJSON(ctx, repoName, tagName)
 	if err != nil {
-		return err
+		logger.Warnf(ctx, "fetch manifest %s:%s: %v", repoName, tagName, err)
+		return pendingTag{}, false
 	}
 
 	// Image-index tags synced before the platform_sizes column existed have
@@ -109,34 +134,78 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 	digest := utils.SHA256Hex(raw)
 	needsPlatformBackfill := existing.kind == manifest.KindImageIndex.String() && !existing.hasPlatformSizes
 	if digest == existing.digest && !needsPlatformBackfill {
-		return nil
+		return pendingTag{}, false
 	}
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("decode manifest %s:%s: %w", repoName, tagName, err)
+		logger.Warnf(ctx, "decode manifest %s:%s: %v", repoName, tagName, err)
+		return pendingTag{}, false
 	}
 
 	kind := manifest.ClassifyParsed(m)
 	totalSize, layerCount, descriptors, platformSizes := tagAggregates(ctx, reg, repoName, m, kind, logger)
 
-	t := Tag{
-		Name:          tagName,
-		Digest:        digest,
-		ArtifactType:  m.ArtifactType,
-		Kind:          kind.String(),
-		ManifestJSON:  string(raw),
-		TotalSize:     totalSize,
-		LayerCount:    layerCount,
-		PlatformSizes: platformSizes,
-		PushedAt:      manifestPushedAt(m),
+	return pendingTag{
+		repoName: repoName,
+		tag: Tag{
+			Name:          tagName,
+			Digest:        digest,
+			ArtifactType:  m.ArtifactType,
+			Kind:          kind.String(),
+			ManifestJSON:  string(raw),
+			TotalSize:     totalSize,
+			LayerCount:    layerCount,
+			PlatformSizes: platformSizes,
+			PushedAt:      manifestPushedAt(m),
+		},
+		descriptors: descriptors,
+	}, true
+}
+
+// commitSync writes every pending tag inside one short transaction.
+// Repositories are upserted first (deduped) so each tag row has a parent
+// ID; tag and blob upserts then run in catalog order. Per-tag failures
+// stay non-fatal so one broken row does not roll back the whole pass.
+func (s *Store) commitSync(ctx context.Context, pending []pendingTag, logger *log.Fields) error {
+	if len(pending) == 0 {
+		return nil
 	}
-	if err := upsertTagTx(ctx, tx, repoID, t); err != nil {
-		return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	repoIDs := make(map[string]int64)
+	for _, p := range pending {
+		if _, ok := repoIDs[p.repoName]; ok {
+			continue
+		}
+		repoID, err := upsertRepositoryTx(ctx, tx, p.repoName)
+		if err != nil {
+			logger.Warnf(ctx, "upsert repo %s: %v", p.repoName, err)
+			continue
+		}
+		repoIDs[p.repoName] = repoID
 	}
 
-	if err := batchUpsertBlobsTx(ctx, tx, descriptors); err != nil {
-		logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", repoName, tagName, err)
+	for _, p := range pending {
+		repoID, ok := repoIDs[p.repoName]
+		if !ok {
+			continue
+		}
+		if err := upsertTagTx(ctx, tx, repoID, p.tag); err != nil {
+			logger.Warnf(ctx, "upsert tag %s:%s: %v", p.repoName, p.tag.Name, err)
+			continue
+		}
+		if err := batchUpsertBlobsTx(ctx, tx, p.descriptors); err != nil {
+			logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", p.repoName, p.tag.Name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
 	}
 	return nil
 }
@@ -256,22 +325,29 @@ func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName st
 	return results
 }
 
-// tagSyncState captures the slice of an existing tag row that syncTag needs
-// to decide whether to skip recomputation. hasPlatformSizes is the NOT NULL
-// presence flag (not the slice itself) because syncTag only needs to know
-// "is this row missing its index materialization" — pulling the actual JSON
-// would be wasted I/O on every sync pass.
+// tagSyncState captures the slice of an existing tag row that prepareTag
+// needs to decide whether to skip recomputation. hasPlatformSizes is the
+// NOT NULL presence flag (not the slice itself) because prepareTag only
+// needs to know "is this row missing its index materialization" — pulling
+// the actual JSON would be wasted I/O on every sync pass.
 type tagSyncState struct {
 	digest           string
 	kind             string
 	hasPlatformSizes bool
 }
 
-func (s *Store) getTagSyncState(ctx context.Context, repoID int64, tagName string) (tagSyncState, error) {
+// getTagSyncState looks up the existing row for one (repoName, tagName)
+// pair via a JOIN against repositories. Phase 1 of sync runs before any
+// repository upsert has happened, so callers do not yet know the row's
+// repository_id; the JOIN keeps the read path repoName-keyed throughout.
+func (s *Store) getTagSyncState(ctx context.Context, repoName, tagName string) (tagSyncState, error) {
 	var st tagSyncState
 	err := s.db.QueryRowContext(ctx,
-		`SELECT digest, kind, platform_sizes IS NOT NULL FROM tags WHERE repository_id = ? AND name = ?`,
-		repoID, tagName,
+		`SELECT t.digest, t.kind, t.platform_sizes IS NOT NULL
+		 FROM tags t
+		 JOIN repositories r ON r.id = t.repository_id
+		 WHERE r.name = ? AND t.name = ?`,
+		repoName, tagName,
 	).Scan(&st.digest, &st.kind, &st.hasPlatformSizes)
 	return st, err
 }
