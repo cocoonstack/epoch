@@ -21,6 +21,10 @@ import (
 // 200-byte SnapshotConfig referenced by manifest.config.digest). It is only
 // inlined when non-nil — the caller decides whether to fetch it (currently
 // only the snapshot kind triggers a fetch).
+//
+// platformSizes is inlined only for image-index tags (the field is empty for
+// every other kind), so the UI can render real per-platform content sizes
+// without each GET refetching every child manifest.
 func tagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[string]any {
 	resp := map[string]any{
 		"repoName":     t.RepoName,
@@ -36,6 +40,9 @@ func tagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[stri
 	}
 	if snapshotConfig != nil {
 		resp["snapshotConfig"] = snapshotConfig
+	}
+	if len(t.PlatformSizes) > 0 {
+		resp["platformSizes"] = t.PlatformSizes
 	}
 	return resp
 }

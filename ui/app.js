@@ -193,6 +193,15 @@ async function renderTagDetail(el, name, tag) {
     // child manifests. Each entry carries platform.{architecture,os,variant}
     // and is content-addressed via its sha256 digest.
     const platforms = m.manifests || [];
+    // platformSizes is the server-materialized standalone (config + sum(layers))
+    // size of each child manifest, keyed by digest. Inlined only for image-index
+    // tags. The OCI spec's manifests[i].size is just the descriptor doc size
+    // (~600 B), which is useless to a user — this map carries the real number.
+    // Index by digest so we can join against platforms[] without an O(n²) loop.
+    const platformSizeByDigest = {};
+    for (const ps of (data.platformSizes || [])) {
+      platformSizeByDigest[ps.digest] = ps;
+    }
     // snapshotConfig is the decoded contents of the snapshot config blob,
     // inlined by the server only when kind == snapshot. Has snapshotId,
     // image, cpu, memory, storage, nics. Other kinds get an empty object so
@@ -291,18 +300,23 @@ async function renderTagDetail(el, name, tag) {
             <thead><tr>
               <th>Platform</th>
               <th>Type</th>
-              <th>Manifest Size</th>
+              <th>Size</th>
+              <th>Layers</th>
               <th>Digest</th>
             </tr></thead>
             <tbody>
-              ${platforms.map(p => `
+              ${platforms.map(p => {
+                const ps = platformSizeByDigest[p.digest];
+                return `
                 <tr>
                   <td class="cell-name">${platformLabel(p.platform)}</td>
                   <td class="cell-mono">${shortMediaType(p.mediaType)}</td>
-                  <td class="cell-size">${humanSize(p.size)}</td>
+                  <td class="cell-size">${ps ? humanSize(ps.size) : '\u2014'}</td>
+                  <td class="cell-size">${ps ? ps.layerCount : '\u2014'}</td>
                   <td class="cell-mono">${shortDigest(p.digest)}</td>
                 </tr>
-              `).join('')}
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>

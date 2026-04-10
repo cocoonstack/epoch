@@ -104,5 +104,11 @@ func (s *Store) migrate(ctx context.Context) error {
 	// Migration: add kind to tags. Stored at sync time so the UI does not
 	// need to round-trip through artifact_type → mediaType heuristics.
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT ''`)
+	// Migration: add platform_sizes JSON column for image-index tags. Each
+	// row holds the standalone (config + layers) size of one child manifest
+	// keyed by digest, materialized at sync time so the tag detail API can
+	// render real per-platform sizes without refetching every child manifest.
+	// NULL for non-index tags.
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN platform_sizes JSON NULL`)
 	return nil
 }

@@ -103,17 +103,18 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 	}
 
 	kind := manifest.ClassifyParsed(m)
-	totalSize, layerCount, descriptors := tagAggregates(ctx, reg, repoName, m, kind, logger)
+	totalSize, layerCount, descriptors, platformSizes := tagAggregates(ctx, reg, repoName, m, kind, logger)
 
 	t := Tag{
-		Name:         tagName,
-		Digest:       digest,
-		ArtifactType: m.ArtifactType,
-		Kind:         kind.String(),
-		ManifestJSON: string(raw),
-		TotalSize:    totalSize,
-		LayerCount:   layerCount,
-		PushedAt:     manifestPushedAt(m),
+		Name:          tagName,
+		Digest:        digest,
+		ArtifactType:  m.ArtifactType,
+		Kind:          kind.String(),
+		ManifestJSON:  string(raw),
+		TotalSize:     totalSize,
+		LayerCount:    layerCount,
+		PlatformSizes: platformSizes,
+		PushedAt:      manifestPushedAt(m),
 	}
 	if err := upsertTagTx(ctx, tx, repoID, t); err != nil {
 		return err
@@ -125,18 +126,19 @@ func (s *Store) syncTag(ctx context.Context, tx *sql.Tx, reg *registry.Registry,
 	return nil
 }
 
-// tagAggregates returns (totalSize, layerCount, descriptors) for the given
-// manifest. For image manifests this is just config + layers. For image
-// indexes it walks each child manifest by digest and dedupes shared blobs
-// across platforms — most multi-arch images publish per-arch layers, but
-// shared base layers (and configs identical across arches) collapse to a
-// single counted byte.
+// tagAggregates returns (totalSize, layerCount, descriptors, platformSizes)
+// for the given manifest. For image manifests this is just config + layers
+// and platformSizes is nil. For image indexes it walks each child manifest
+// by digest, dedupes shared blobs across platforms for the totalSize union
+// (most multi-arch images publish per-arch layers, but shared base layers
+// and configs identical across arches collapse to a single counted byte),
+// and additionally returns the per-child standalone size in platformSizes
+// without that cross-platform dedup.
 //
 // layerCount for an index is the number of platform manifests it references
 // (the natural answer to "how many things compose this tag" when the tag is
-// multi-arch). Per-platform layer counts are surfaced separately by the tag
-// detail API.
-func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind, logger *log.Fields) (int64, int, []manifest.Descriptor) {
+// multi-arch). Per-platform layer counts are carried inside platformSizes.
+func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
 	if kind == manifest.KindImageIndex {
 		return expandIndexAggregates(ctx, reg, repoName, m, logger)
 	}
@@ -145,17 +147,22 @@ func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string,
 		totalSize += layer.Size
 	}
 	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
-	return totalSize, len(m.Layers), descriptors
+	return totalSize, len(m.Layers), descriptors, nil
 }
 
 // expandIndexAggregates fetches every child manifest of an image index and
-// returns the aggregated totals. Failures fetching a single child are logged
-// and skipped — partial aggregates are better than refusing to sync the
-// whole tag because one platform's manifest is unreachable.
-func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor) {
+// returns the aggregated totals plus a per-child standalone size list. The
+// totalSize dedupes shared blobs across platforms; the per-child entries in
+// platformSizes do NOT — they answer "if I only pulled this platform, how
+// big is it" and are what the UI surfaces in the Platforms table. Failures
+// fetching a single child are logged and skipped — partial aggregates are
+// better than refusing to sync the whole tag because one platform's manifest
+// is unreachable.
+func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
 	seen := make(map[string]bool)
 	var totalSize int64
 	descriptors := make([]manifest.Descriptor, 0, 4*len(m.Manifests))
+	platformSizes := make(PlatformSizes, 0, len(m.Manifests))
 
 	for _, child := range m.Manifests {
 		childRaw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
@@ -168,6 +175,17 @@ func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName
 			logger.Warnf(ctx, "parse index child %s@%s: %v", repoName, child.Digest, err)
 			continue
 		}
+
+		childSize := childM.Config.Size
+		for _, l := range childM.Layers {
+			childSize += l.Size
+		}
+		platformSizes = append(platformSizes, PlatformSize{
+			Digest:     child.Digest,
+			Size:       childSize,
+			LayerCount: len(childM.Layers),
+		})
+
 		for _, d := range slices.Concat([]manifest.Descriptor{childM.Config}, childM.Layers) {
 			if d.Digest == "" || seen[d.Digest] {
 				continue
@@ -177,7 +195,7 @@ func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName
 			descriptors = append(descriptors, d)
 		}
 	}
-	return totalSize, len(m.Manifests), descriptors
+	return totalSize, len(m.Manifests), descriptors, platformSizes
 }
 
 func (s *Store) getTagDigest(ctx context.Context, repoID int64, tagName string) (string, error) {
@@ -197,14 +215,15 @@ func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, er
 
 func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO tags (repository_id, name, digest, artifact_type, kind, manifest_json, total_size, layer_count, pushed_at, synced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+		INSERT INTO tags (repository_id, name, digest, artifact_type, kind, manifest_json, total_size, layer_count, platform_sizes, pushed_at, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
 			digest=VALUES(digest), artifact_type=VALUES(artifact_type), kind=VALUES(kind),
 			manifest_json=VALUES(manifest_json),
 			total_size=VALUES(total_size), layer_count=VALUES(layer_count),
+			platform_sizes=VALUES(platform_sizes),
 			pushed_at=VALUES(pushed_at), synced_at=NOW()`,
-		repoID, t.Name, t.Digest, t.ArtifactType, t.Kind, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PushedAt)
+		repoID, t.Name, t.Digest, t.ArtifactType, t.Kind, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PlatformSizes, t.PushedAt)
 	return err
 }
 

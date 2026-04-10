@@ -78,7 +78,7 @@ func (s *Store) GetTag(ctx context.Context, repoName, tagName string) (*Tag, err
 		tag.RepoName = repoName
 		return tag.scanDetails(s.db.QueryRowContext(ctx, `
 		SELECT t.id, t.repository_id, t.name, t.digest, t.artifact_type, t.kind, t.manifest_json,
-			t.total_size, t.layer_count, t.pushed_at, t.synced_at
+			t.total_size, t.layer_count, t.platform_sizes, t.pushed_at, t.synced_at
 		FROM tags t
 		JOIN repositories r ON r.id = t.repository_id
 		WHERE r.name = ? AND t.name = ?`, repoName, tagName))
