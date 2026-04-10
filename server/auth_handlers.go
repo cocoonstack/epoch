@@ -58,9 +58,27 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "UI auth not configured", http.StatusNotImplemented)
 		return
 	}
-	// Verify state
-	stateCookie, err := r.Cookie("sso_state")
-	if err != nil || stateCookie.Value == "" || stateCookie.Value != r.URL.Query().Get("state") {
+
+	// The state cookie is one-shot: handleLogin sets it, the success path
+	// below clears it, then the browser navigates to "/". If the user
+	// re-fires this GET — by hitting the browser back button, by Google
+	// replaying the redirect on a re-confirmation, or by reloading the
+	// callback URL — the cookie will already be gone and the strict state
+	// check below would surface "invalid state" to a user who is in fact
+	// still authenticated. Detect that replay shape (no state cookie BUT
+	// an unexpired session exists) and bounce them home instead. A genuine
+	// CSRF or unauthenticated stray callback still has no session, so it
+	// keeps falling through to the original 403.
+	stateCookie, stateCookieErr := r.Cookie("sso_state")
+	if stateCookieErr != nil || stateCookie.Value == "" {
+		if sess := s.getSession(r); sess != nil {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+		http.Error(w, "invalid state", http.StatusForbidden)
+		return
+	}
+	if stateCookie.Value != r.URL.Query().Get("state") {
 		http.Error(w, "invalid state", http.StatusForbidden)
 		return
 	}
