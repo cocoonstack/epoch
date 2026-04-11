@@ -11,7 +11,7 @@ import (
 type testCtxKey struct{}
 
 func TestNewHTTPServerConfiguresTimeoutsAndBaseContext(t *testing.T) {
-	ctx := context.WithValue(context.Background(), testCtxKey{}, "value")
+	ctx := context.WithValue(t.Context(), testCtxKey{}, "value")
 
 	srv := newHTTPServer(ctx, ":8080", http.NewServeMux())
 
@@ -36,7 +36,7 @@ func TestServeOnListenerShutsDownOnContextCancel(t *testing.T) {
 	}
 	defer func() { _ = ln.Close() }()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	started := make(chan struct{})
@@ -58,7 +58,7 @@ func TestServeOnListenerShutsDownOnContextCancel(t *testing.T) {
 
 	clientDone := make(chan error, 1)
 	go func() {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+ln.Addr().String(), nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String(), nil)
 		if err != nil {
 			clientDone <- err
 			return

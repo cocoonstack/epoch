@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -18,7 +17,7 @@ func TestListTokensReturnsScanError(t *testing.T) {
 	mock.ExpectQuery("SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 
-	if _, err := s.ListTokens(context.Background()); err == nil {
+	if _, err := s.ListTokens(t.Context()); err == nil {
 		t.Fatalf("ListTokens returned nil error for malformed row")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

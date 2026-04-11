@@ -1,7 +1,6 @@
 package registryclient
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,7 +85,7 @@ func TestClientV2RoundTrip(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "token-123")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	data, ct, err := c.GetManifest(ctx, repoName, "latest")
 	if err != nil {

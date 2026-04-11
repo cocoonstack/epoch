@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -29,12 +28,12 @@ func TestValidateTokenCachesAndUpdatesAsync(t *testing.T) {
 		WithArgs(digest).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	if !s.ValidateToken(context.Background(), token) {
+	if !s.ValidateToken(t.Context(), token) {
 		t.Fatalf("ValidateToken returned false for an existing token")
 	}
 	time.Sleep(50 * time.Millisecond)
 
-	if !s.ValidateToken(context.Background(), token) {
+	if !s.ValidateToken(t.Context(), token) {
 		t.Fatalf("ValidateToken cache miss on second call")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -57,7 +56,7 @@ func TestValidateTokenReturnsFalseWhenTokenMissing(t *testing.T) {
 		WithArgs(digest).
 		WillReturnError(sql.ErrNoRows)
 
-	if s.ValidateToken(context.Background(), token) {
+	if s.ValidateToken(t.Context(), token) {
 		t.Fatalf("ValidateToken returned true for a missing token")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

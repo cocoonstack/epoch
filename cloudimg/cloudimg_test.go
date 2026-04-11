@@ -57,7 +57,7 @@ func TestStreamConcatenatesDiskLayersInTitleOrder(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := Stream(context.Background(), []byte(winManifest), blobs, &out); err != nil {
+	if err := Stream(t.Context(), []byte(winManifest), blobs, &out); err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
 	if got, want := out.String(), "AAAABBBB"; got != want {
@@ -72,7 +72,7 @@ func TestStreamRejectsContainerImage(t *testing.T) {
 		"config": {"mediaType":"application/vnd.oci.image.config.v1+json","digest":"sha256:00","size":1},
 		"layers": [{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":"sha256:11","size":1}]
 	}`
-	err := Stream(context.Background(), []byte(containerManifest), fakeBlobs{}, io.Discard)
+	err := Stream(t.Context(), []byte(containerManifest), fakeBlobs{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected error streaming container image")
 	}
@@ -89,7 +89,7 @@ func TestStreamRejectsManifestWithNoDiskLayers(t *testing.T) {
 		"config": {"mediaType":"application/vnd.oci.empty.v1+json","digest":"sha256:00","size":2},
 		"layers": [{"mediaType":"text/plain","digest":"sha256:11","size":1}]
 	}`
-	err := Stream(context.Background(), []byte(noDisk), fakeBlobs{}, io.Discard)
+	err := Stream(t.Context(), []byte(noDisk), fakeBlobs{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for manifest with no disk layers")
 	}
@@ -164,7 +164,7 @@ func TestPullerPipesAssembledDiskToCocoonImport(t *testing.T) {
 	cocoon := &fakeCocoon{}
 	puller := &Puller{Downloader: dl, Cocoon: cocoon}
 
-	if err := puller.Pull(context.Background(), PullOptions{
+	if err := puller.Pull(t.Context(), PullOptions{
 		Name:      "windows/win11",
 		Tag:       "25h2",
 		LocalName: "win11",

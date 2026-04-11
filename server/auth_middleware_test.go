@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,7 +68,7 @@ func TestLoginRouteNotShadowedByUICatchall(t *testing.T) {
 			CookieSecret: []byte("0123456789abcdef0123456789abcdef"),
 		},
 	}
-	s.setupRoutes(context.Background())
+	s.setupRoutes(t.Context())
 
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
