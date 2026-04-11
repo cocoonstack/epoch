@@ -419,41 +419,61 @@ func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, descriptors []manifest.
 func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 	logger := log.WithFunc("store.cleanOrphans")
 
-	type repositoryRef struct {
-		ID   int64
-		Name string
+	// One LEFT JOIN replaces the previous N+1 (one SELECT-tags-per-repo) so
+	// large registries pay a single round-trip for the whole orphan scan.
+	// The LEFT JOIN keeps empty repositories in the result set so they can
+	// still be garbage-collected when they disappear from the catalog; rows
+	// for empty repos come back with a NULL tag name.
+	type repoTagRow struct {
+		repoID   int64
+		repoName string
+		tagName  sql.NullString
 	}
-
-	repos, err := queryRows(ctx, s.db, `SELECT id, name FROM repositories`, func(rows *sql.Rows, repo *repositoryRef) error {
-		return rows.Scan(&repo.ID, &repo.Name)
-	})
+	rows, err := queryRows(ctx, s.db,
+		`SELECT r.id, r.name, t.name
+		 FROM repositories r
+		 LEFT JOIN tags t ON t.repository_id = r.id`,
+		func(r *sql.Rows, row *repoTagRow) error {
+			return r.Scan(&row.repoID, &row.repoName, &row.tagName)
+		})
 	if err != nil {
 		logger.Warnf(ctx, "list repositories: %v", err)
 		return
 	}
 
-	for _, repoRef := range repos {
-		repo, exists := cat.Repositories[repoRef.Name]
+	type repoState struct {
+		id   int64
+		name string
+		tags []string
+	}
+	repos := make(map[int64]*repoState)
+	for _, row := range rows {
+		r, ok := repos[row.repoID]
+		if !ok {
+			r = &repoState{id: row.repoID, name: row.repoName}
+			repos[row.repoID] = r
+		}
+		if row.tagName.Valid {
+			r.tags = append(r.tags, row.tagName.String)
+		}
+	}
+
+	for _, r := range repos {
+		catRepo, exists := cat.Repositories[r.name]
 		if !exists {
-			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, repoRef.ID); delErr != nil {
-				logger.Warnf(ctx, "delete orphan repository %s: %v", repoRef.Name, delErr)
+			// Tags are removed via ON DELETE CASCADE on repository_id, so the
+			// per-tag loop below can skip orphan repos entirely.
+			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, r.id); delErr != nil {
+				logger.Warnf(ctx, "delete orphan repository %s: %v", r.name, delErr)
 			}
 			continue
 		}
-
-		tagNames, err := queryRows(ctx, s.db, `SELECT name FROM tags WHERE repository_id = ?`, func(rows *sql.Rows, tagName *string) error {
-			return rows.Scan(tagName)
-		}, repoRef.ID)
-		if err != nil {
-			logger.Warnf(ctx, "list tags for %s: %v", repoRef.Name, err)
-			continue
-		}
-
-		for _, tagName := range tagNames {
-			if _, ok := repo.Tags[tagName]; !ok {
-				if _, delErr := s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, repoRef.ID, tagName); delErr != nil {
-					logger.Warnf(ctx, "delete orphan tag %s:%s: %v", repoRef.Name, tagName, delErr)
-				}
+		for _, tagName := range r.tags {
+			if _, ok := catRepo.Tags[tagName]; ok {
+				continue
+			}
+			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, r.id, tagName); delErr != nil {
+				logger.Warnf(ctx, "delete orphan tag %s:%s: %v", r.name, tagName, delErr)
 			}
 		}
 	}
