@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // BlobReader is the minimal blob-fetch interface needed by [Stream]. Both
@@ -95,15 +96,5 @@ func copyBlob(ctx context.Context, blobs BlobReader, layer manifest.Descriptor, 
 		return fmt.Errorf("get blob %s: %w", layer.Digest, err)
 	}
 	defer func() { _ = body.Close() }()
-	written, err := io.CopyN(w, body, layer.Size)
-	if err != nil {
-		return fmt.Errorf("copy blob %s: %w", layer.Digest, err)
-	}
-	if extra, _ := io.Copy(io.Discard, body); extra > 0 {
-		return fmt.Errorf("blob %s longer than manifest size %d (got %d extra)", layer.Digest, layer.Size, extra)
-	}
-	if written != layer.Size {
-		return fmt.Errorf("blob %s shorter than manifest size %d (got %d)", layer.Digest, layer.Size, written)
-	}
-	return nil
+	return utils.CopyBlobExact(w, body, layer.Digest, layer.Size)
 }

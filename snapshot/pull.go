@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // Puller fetches a snapshot OCI artifact and pipes it into
@@ -271,20 +272,7 @@ func streamLayerToTar(ctx context.Context, dl Downloader, name string, layer man
 		return fmt.Errorf("get blob %s: %w", layer.Digest, err)
 	}
 	defer func() { _ = body.Close() }()
-	written, err := io.CopyN(tw, body, layer.Size)
-	if err != nil {
-		return fmt.Errorf("copy blob %s: %w", layer.Digest, err)
-	}
-	// Drain any extra bytes the registry sent so the connection can be
-	// reused; if there are extras, fail loudly because the manifest size
-	// is the source of truth.
-	if extra, _ := io.Copy(io.Discard, body); extra > 0 {
-		return fmt.Errorf("blob %s longer than manifest size %d (got %d extra)", layer.Digest, layer.Size, extra)
-	}
-	if written != layer.Size {
-		return fmt.Errorf("blob %s shorter than manifest size %d (got %d)", layer.Digest, layer.Size, written)
-	}
-	return nil
+	return utils.CopyBlobExact(tw, body, layer.Digest, layer.Size)
 }
 
 func writeTarFile(tw *tar.Writer, name string, data []byte, mode int64, modTime time.Time) error {

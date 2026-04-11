@@ -21,8 +21,6 @@ package registry
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +31,7 @@ import (
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 const catalogCacheTTL = 10 * time.Second
@@ -150,8 +149,7 @@ func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data 
 // Returns the computed `sha256:<hex>` digest so the caller can echo it in
 // the response and verify it against a digest reference if present.
 func (r *Registry) PushManifestJSONByDigest(ctx context.Context, name string, data []byte) (string, error) {
-	h := sha256.Sum256(data)
-	digest := "sha256:" + hex.EncodeToString(h[:])
+	digest := "sha256:" + utils.SHA256Hex(data)
 
 	digestKey := manifestDigestKey(name, digest)
 	if err := r.client.Put(ctx, digestKey, bytes.NewReader(data), int64(len(data))); err != nil {
@@ -219,8 +217,7 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 		cat.Repositories = make(map[string]*manifest.Repository)
 	}
 
-	h := sha256.Sum256(raw)
-	return &cat, hex.EncodeToString(h[:]), nil
+	return &cat, utils.SHA256Hex(raw), nil
 }
 
 // getCatalogRaw returns the raw catalog JSON bytes, populating the cache on
