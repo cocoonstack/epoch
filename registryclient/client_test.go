@@ -1,6 +1,7 @@
 package registryclient
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -135,5 +136,45 @@ func TestClientV2RoundTrip(t *testing.T) {
 	}
 	if handlerErrCopy != nil {
 		t.Fatalf("handler error: %v", handlerErrCopy)
+	}
+}
+
+// TestGetManifestNotFoundReturnsSentinel locks in the contract the
+// cocoon-operator hibernation reconciler depends on: a 404 from the
+// registry surfaces as ErrManifestNotFound so callers can tell
+// "snapshot not pushed yet" apart from real transport or server
+// failures, while other non-200 statuses continue to flow through
+// statusError as descriptive errors.
+func TestGetManifestNotFoundReturnsSentinel(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	_, _, err := c.GetManifest(t.Context(), "demo", "missing")
+	if err == nil {
+		t.Fatalf("GetManifest on 404 must return an error")
+	}
+	if !errors.Is(err, ErrManifestNotFound) {
+		t.Errorf("GetManifest 404 err = %v, want errors.Is(..., ErrManifestNotFound)", err)
+	}
+}
+
+func TestGetManifestServerErrorNotConfusedWithNotFound(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	_, _, err := c.GetManifest(t.Context(), "demo", "boom")
+	if err == nil {
+		t.Fatalf("GetManifest on 500 must return an error")
+	}
+	if errors.Is(err, ErrManifestNotFound) {
+		t.Errorf("GetManifest 500 must NOT satisfy errors.Is(..., ErrManifestNotFound), got %v", err)
 	}
 }

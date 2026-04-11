@@ -8,12 +8,24 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// ErrManifestNotFound is returned by GetManifest when the registry
+// responds with 404 for the requested (name, tag). Callers that want
+// to distinguish "not yet pushed" from real transport / server
+// failures should use errors.Is(err, ErrManifestNotFound) instead of
+// treating every error as absence.
+//
+// Introduced so cocoon-operator can stop swallowing epoch transport
+// errors as "hibernation snapshot not ready yet" — see the
+// SnapshotRegistry adapter in cocoon-operator/epoch.
+var ErrManifestNotFound = errors.New("registryclient: manifest not found")
 
 const (
 	defaultBaseURL    = "http://127.0.0.1:8080"
@@ -71,6 +83,11 @@ func (c *Client) BaseURL() string {
 // GetManifest downloads a manifest's raw bytes for `name:tag` and returns
 // them along with the server-supplied Content-Type. Callers that need to
 // classify the manifest pass the bytes to manifest.Classify.
+//
+// A 404 response returns ErrManifestNotFound so callers can distinguish
+// "the tag has not been pushed yet" from real transport or server
+// failures with errors.Is. Every other non-200 status flows through
+// statusError as a descriptive error.
 func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, string, error) {
 	rawURL := c.v2URL(name, "manifests", tag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -86,7 +103,12 @@ func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, str
 		return nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// fall through
+	case http.StatusNotFound:
+		return nil, "", fmt.Errorf("%s %s: %w", http.MethodGet, rawURL, ErrManifestNotFound)
+	default:
 		return nil, "", c.statusError(http.MethodGet, rawURL, resp)
 	}
 	data, err := io.ReadAll(resp.Body)
