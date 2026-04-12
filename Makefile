@@ -2,7 +2,7 @@
 
 REPO_PATH := github.com/cocoonstack/epoch
 BINARY_NAME := epoch
-GOIMPORTS_LOCAL_PREFIXES := $(REPO_PATH)
+GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
 REVISION := $(shell git rev-parse HEAD || echo unknown)
 BUILTAT := $(shell date +%Y-%m-%dT%H:%M:%S)
 VERSION := $(shell git describe --tags $(shell git rev-list --tags --max-count=1) 2>/dev/null || echo dev)
@@ -33,8 +33,9 @@ GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
 
 GOFMT := $(LOCALBIN)/gofumpt
 GOIMPORTS := $(LOCALBIN)/goimports
-LINT_GOOS ?= linux darwin
-LINT_GOARCH ?= amd64
+
+## Target OSes for vet / lint
+GOOSES ?= linux darwin
 
 ## Tool download targets
 .PHONY: golangci-lint
@@ -58,8 +59,12 @@ all: deps fmt lint test build ## Full pipeline: deps, fmt, lint, test, build
 
 # --- Dependencies ---
 
-deps: ## Tidy Go modules
-	go mod tidy
+deps: ## Tidy Go modules (no-op when running inside a Go workspace)
+	@if [ -z "$$(go env GOWORK)" ] || [ "$$(go env GOWORK)" = "off" ]; then \
+		go mod tidy; \
+	else \
+		echo "==> workspace mode active ($$(go env GOWORK)); skipping go mod tidy"; \
+	fi
 
 # --- Build ---
 
@@ -78,13 +83,16 @@ coverage: test ## Generate and display coverage report
 
 # --- Code quality ---
 
-vet: ## Run go vet
-	go vet ./...
+vet: ## Run go vet on every target OS
+	@for goos in $(GOOSES); do \
+		echo "==> go vet GOOS=$$goos"; \
+		GOOS=$$goos go vet ./... || exit 1; \
+	done
 
-lint: golangci-lint ## Run golangci-lint for linux and darwin
-	@for goos in $(LINT_GOOS); do \
-		echo "Running golangci-lint for GOOS=$$goos GOARCH=$(LINT_GOARCH)"; \
-		GOOS=$$goos GOARCH=$(LINT_GOARCH) $(GOLANGCILINT) run ./...; \
+lint: golangci-lint ## Run golangci-lint on every target OS
+	@for goos in $(GOOSES); do \
+		echo "==> golangci-lint GOOS=$$goos"; \
+		GOOS=$$goos $(GOLANGCILINT) run ./... || exit 1; \
 	done
 
 fmt: gofumpt goimports ## Format code with gofumpt and goimports
