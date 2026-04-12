@@ -7,27 +7,31 @@ import (
 	"io"
 )
 
+// Downloader abstracts OCI manifest and blob downloads.
 type Downloader interface {
 	GetManifest(ctx context.Context, name, tag string) ([]byte, string, error)
 	GetBlob(ctx context.Context, name, digest string) (io.ReadCloser, error)
 }
 
+// CocoonRunner abstracts the cocoon image import subprocess.
 type CocoonRunner interface {
 	ImageImport(ctx context.Context, name string) (io.WriteCloser, func() error, error)
 }
 
+// Puller downloads cloud-image artifacts and pipes them into cocoon image import.
 type Puller struct {
 	Downloader Downloader
 	Cocoon     CocoonRunner
 }
 
+// PullOptions configures a cloud-image pull operation.
 type PullOptions struct {
 	Name      string // OCI repository name. Required.
 	Tag       string // Defaults to "latest".
 	LocalName string // Override the cocoon-side image name. Empty = use Name.
 }
 
-// Pull downloads a cloud-image artifact and pipes it into `cocoon image import`.
+// Pull downloads a cloud-image artifact and pipes it into cocoon image import.
 func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	if opts.Name == "" {
 		return errors.New("cloudimg pull: name is required")
@@ -70,6 +74,7 @@ type blobReaderAdapter struct {
 	dl   Downloader
 }
 
+// ReadBlob downloads a blob by digest via the underlying Downloader.
 func (a blobReaderAdapter) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
 	return a.dl.GetBlob(ctx, a.name, digest)
 }

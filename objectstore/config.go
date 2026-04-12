@@ -12,6 +12,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// Config holds S3-compatible object store connection settings.
 type Config struct {
 	Endpoint  string
 	AccessKey string //nolint:gosec // configuration schema field name

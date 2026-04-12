@@ -6,15 +6,17 @@ import (
 	"strings"
 )
 
-var publicExactPaths = map[string]bool{
-	"/healthz":        true,
-	"/login":          true,
-	"/login/callback": true,
-	"/logout":         true,
-	"/v2/token":       true,
-}
+var (
+	publicExactPaths = map[string]bool{
+		"/healthz":        true,
+		"/login":          true,
+		"/login/callback": true,
+		"/logout":         true,
+		"/v2/token":       true,
+	}
 
-var publicPathPrefixes = []string{"/dl/"}
+	publicPathPrefixes = []string{"/dl/"}
+)
 
 func isPublicPath(path string) bool {
 	if publicExactPaths[path] {

@@ -18,11 +18,13 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// Pusher exports and uploads cocoon snapshots as OCI artifacts.
 type Pusher struct {
 	Uploader Uploader
 	Cocoon   CocoonRunner
 }
 
+// PushOptions configures a snapshot push operation.
 type PushOptions struct {
 	Name      string
 	Tag       string
@@ -32,6 +34,7 @@ type PushOptions struct {
 	Progress  func(string)
 }
 
+// PushResult contains the outcome of a successful push.
 type PushResult struct {
 	Name           string
 	Tag            string

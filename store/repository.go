@@ -31,6 +31,7 @@ LEFT JOIN (
     ) ranked WHERE rn = 1
 ) lt ON lt.repository_id = r.id`
 
+// ListRepositories returns all repositories ordered by last update.
 func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	return queryRows(ctx, s.db, repoSummarySelect+`
 		ORDER BY r.updated_at DESC`, func(rows *sql.Rows, repo *Repository) error {
@@ -38,6 +39,7 @@ func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	})
 }
 
+// GetRepository returns a single repository by name, or nil if not found.
 func (s *Store) GetRepository(ctx context.Context, name string) (*Repository, error) {
 	return queryOptional(func(repo *Repository) error {
 		return repo.scanSummary(s.db.QueryRowContext(ctx, repoSummarySelect+`
@@ -45,6 +47,7 @@ func (s *Store) GetRepository(ctx context.Context, name string) (*Repository, er
 	})
 }
 
+// ListTags returns all tags for a repository ordered by push time.
 func (s *Store) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 	return queryRows(ctx, s.db, `
 		SELECT t.id, t.repository_id, t.name, t.digest, t.artifact_type, t.kind, t.total_size, t.layer_count, t.pushed_at, t.synced_at
@@ -57,6 +60,7 @@ func (s *Store) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 	}, repoName)
 }
 
+// GetTag returns a single tag with full details, or nil if not found.
 func (s *Store) GetTag(ctx context.Context, repoName, tagName string) (*Tag, error) {
 	return queryOptional(func(tag *Tag) error {
 		tag.RepoName = repoName
@@ -69,6 +73,7 @@ func (s *Store) GetTag(ctx context.Context, repoName, tagName string) (*Tag, err
 	})
 }
 
+// DeleteTag removes a tag from the database by repository name and tag name.
 func (s *Store) DeleteTag(ctx context.Context, repoName, tagName string) error {
 	_, err := s.db.ExecContext(ctx, `
 		DELETE t FROM tags t
@@ -77,6 +82,7 @@ func (s *Store) DeleteTag(ctx context.Context, repoName, tagName string) error {
 	return err
 }
 
+// GetStats returns aggregate counts for the dashboard.
 func (s *Store) GetStats(ctx context.Context) (*DashboardStats, error) {
 	var st DashboardStats
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM repositories`).Scan(&st.RepositoryCount)

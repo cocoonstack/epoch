@@ -12,6 +12,38 @@ import (
 	"github.com/cocoonstack/epoch/snapshot"
 )
 
+type registryBlobReader struct {
+	reg blobStreamer
+}
+
+// ReadBlob downloads a blob by digest from the registry object store.
+func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
+	body, _, err := r.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
+	return body, err
+}
+
+// registryDownloader adapts *registry.Registry to snapshot.Downloader.
+type registryDownloader struct {
+	reg          manifestStreamer
+	manifestName string
+	manifestRaw  []byte
+}
+
+// GetManifest returns the manifest JSON, using a cached copy when available.
+func (d *registryDownloader) GetManifest(ctx context.Context, name, _ string) ([]byte, string, error) {
+	if name == d.manifestName && d.manifestRaw != nil {
+		return d.manifestRaw, "", nil
+	}
+	raw, err := d.reg.ManifestJSON(ctx, name, "latest")
+	return raw, "", err
+}
+
+// GetBlob downloads a blob by digest from the registry object store.
+func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.ReadCloser, error) {
+	body, _, err := d.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
+	return body, err
+}
+
 // handleArtifactDownload streams a cloud image or snapshot by name. Auth-exempt.
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
@@ -47,6 +79,15 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+type blobStreamer interface {
+	StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error)
+}
+
+type manifestStreamer interface {
+	blobStreamer
+	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
+}
+
 func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest, logger *log.Fields) {
 	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.WriteHeader(http.StatusOK)
@@ -67,42 +108,4 @@ func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name str
 	}); streamErr != nil {
 		logger.Errorf(r.Context(), streamErr, "stream snapshot %s", name)
 	}
-}
-
-type registryBlobReader struct {
-	reg blobStreamer
-}
-
-type blobStreamer interface {
-	StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error)
-}
-
-func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
-	body, _, err := r.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
-	return body, err
-}
-
-// registryDownloader adapts *registry.Registry to snapshot.Downloader.
-type registryDownloader struct {
-	reg          manifestStreamer
-	manifestName string
-	manifestRaw  []byte
-}
-
-type manifestStreamer interface {
-	blobStreamer
-	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
-}
-
-func (d *registryDownloader) GetManifest(ctx context.Context, name, _ string) ([]byte, string, error) {
-	if name == d.manifestName && d.manifestRaw != nil {
-		return d.manifestRaw, "", nil
-	}
-	raw, err := d.reg.ManifestJSON(ctx, name, "latest")
-	return raw, "", err
-}
-
-func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.ReadCloser, error) {
-	body, _, err := d.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
-	return body, err
 }

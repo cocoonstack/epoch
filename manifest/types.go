@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Kind identifies the artifact classification of an OCI manifest.
 type Kind int
 
 const (
@@ -17,6 +18,7 @@ const (
 	KindImageIndex
 )
 
+// String returns the human-readable name of the artifact kind.
 func (k Kind) String() string {
 	switch k {
 	case KindContainerImage:
@@ -32,6 +34,7 @@ func (k Kind) String() string {
 	}
 }
 
+// Descriptor is an OCI content descriptor (mediaType + digest + size).
 type Descriptor struct {
 	MediaType    string            `json:"mediaType"`
 	Digest       string            `json:"digest"`
@@ -40,6 +43,7 @@ type Descriptor struct {
 	ArtifactType string            `json:"artifactType,omitempty"`
 }
 
+// Title returns the org.opencontainers.image.title annotation, if any.
 func (d Descriptor) Title() string {
 	if d.Annotations == nil {
 		return ""
@@ -59,6 +63,7 @@ type OCIManifest struct {
 	Annotations   map[string]string `json:"annotations,omitempty"`
 }
 
+// IndexManifest describes one platform entry inside an OCI image index.
 type IndexManifest struct {
 	MediaType string    `json:"mediaType"`
 	Digest    string    `json:"digest"`
@@ -66,6 +71,7 @@ type IndexManifest struct {
 	Platform  *Platform `json:"platform,omitempty"`
 }
 
+// Platform describes OS and architecture for an index entry.
 type Platform struct {
 	Architecture string `json:"architecture,omitempty"`
 	OS           string `json:"os,omitempty"`
@@ -73,6 +79,7 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
+// Parse unmarshals raw JSON into an OCIManifest.
 func Parse(raw []byte) (*OCIManifest, error) {
 	var m OCIManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -101,27 +108,7 @@ func ClassifyParsed(m *OCIManifest) Kind {
 	return classifyFields(m.ArtifactType, m.Config.MediaType, m.MediaType)
 }
 
-func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
-	switch artifactType {
-	case ArtifactTypeOSImage, ArtifactTypeWindowsImage:
-		return KindCloudImage
-	case ArtifactTypeSnapshot:
-		return KindSnapshot
-	}
-
-	switch configMediaType {
-	case MediaTypeOCIImageConfig, MediaTypeDockerConfig:
-		return KindContainerImage
-	}
-
-	switch topMediaType {
-	case MediaTypeOCIIndex, MediaTypeDockerIndex:
-		return KindImageIndex
-	}
-
-	return KindUnknown
-}
-
+// SnapshotFile holds per-file metadata stored in the snapshot config blob.
 type SnapshotFile struct {
 	Mode       int64  `json:"mode,omitempty"`
 	SparseMap  string `json:"sparseMap,omitempty"`
@@ -146,12 +133,35 @@ type SnapshotConfig struct {
 	CreatedAt     time.Time               `json:"createdAt"`
 }
 
+// Catalog is the global index of all repositories and their tags.
 type Catalog struct {
 	Repositories map[string]*Repository `json:"repositories"`
 	UpdatedAt    time.Time              `json:"updatedAt"`
 }
 
+// Repository maps tag names to their manifest keys in the object store.
 type Repository struct {
 	Tags      map[string]string `json:"tags"`
 	UpdatedAt time.Time         `json:"updatedAt"`
+}
+
+func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
+	switch artifactType {
+	case ArtifactTypeOSImage, ArtifactTypeWindowsImage:
+		return KindCloudImage
+	case ArtifactTypeSnapshot:
+		return KindSnapshot
+	}
+
+	switch configMediaType {
+	case MediaTypeOCIImageConfig, MediaTypeDockerConfig:
+		return KindContainerImage
+	}
+
+	switch topMediaType {
+	case MediaTypeOCIIndex, MediaTypeDockerIndex:
+		return KindImageIndex
+	}
+
+	return KindUnknown
 }

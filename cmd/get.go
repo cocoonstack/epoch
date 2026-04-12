@@ -60,6 +60,7 @@ type httpBlobReader struct {
 	name   string
 }
 
+// ReadBlob downloads a blob by digest from the remote registry.
 func (h *httpBlobReader) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
 	return h.client.GetBlob(ctx, h.name, digest)
 }

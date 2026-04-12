@@ -15,11 +15,13 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// Puller downloads snapshot artifacts and pipes them into cocoon snapshot import.
 type Puller struct {
 	Downloader Downloader
 	Cocoon     CocoonRunner
 }
 
+// PullOptions configures a snapshot pull operation.
 type PullOptions struct {
 	Name        string
 	Tag         string
@@ -74,6 +76,7 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	return nil
 }
 
+// StreamOptions configures snapshot tar stream assembly.
 type StreamOptions struct {
 	Name      string
 	LocalName string // empty = use Name
@@ -120,6 +123,27 @@ func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, o
 	}
 
 	return writeImportTar(ctx, dl, opts.Name, localName, cfg, m.Layers, opts.Writer, opts.Progress)
+}
+
+// FetchSnapshotConfig downloads and parses the snapshot config blob.
+func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
+	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
+		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
+	}
+	body, err := dl.GetBlob(ctx, name, desc.Digest)
+	if err != nil {
+		return nil, fmt.Errorf("get config blob %s: %w", desc.Digest, err)
+	}
+	defer func() { _ = body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(body, 1<<20)) // config blob is tiny
+	if err != nil {
+		return nil, fmt.Errorf("read config blob: %w", err)
+	}
+	var cfg manifest.SnapshotConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse snapshot config: %w", err)
+	}
+	return &cfg, nil
 }
 
 func writeImportTar(ctx context.Context, dl Downloader, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {
@@ -175,27 +199,6 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 		return fmt.Errorf("close tar: %w", err)
 	}
 	return bw.Flush()
-}
-
-// FetchSnapshotConfig downloads and parses the snapshot config blob.
-func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
-	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
-		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
-	}
-	body, err := dl.GetBlob(ctx, name, desc.Digest)
-	if err != nil {
-		return nil, fmt.Errorf("get config blob %s: %w", desc.Digest, err)
-	}
-	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, 1<<20)) // config blob is tiny
-	if err != nil {
-		return nil, fmt.Errorf("read config blob: %w", err)
-	}
-	var cfg manifest.SnapshotConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse snapshot config: %w", err)
-	}
-	return &cfg, nil
 }
 
 func streamLayerToTar(ctx context.Context, dl Downloader, name string, layer manifest.Descriptor, fileMeta manifest.SnapshotFile, tw *tar.Writer, modTime time.Time) error {

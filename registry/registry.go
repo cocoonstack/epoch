@@ -30,10 +30,12 @@ type Registry struct {
 	catalogExpiry time.Time  // expiry of catalogCache
 }
 
+// New creates a Registry backed by the given object store client.
 func New(client *objectstore.Client) *Registry {
 	return &Registry{client: client}
 }
 
+// NewFromEnv creates a Registry using S3 configuration from environment variables.
 func NewFromEnv() (*Registry, error) {
 	cfg, err := objectstore.ConfigFromEnv("epoch/")
 	if err != nil {
@@ -54,6 +56,7 @@ func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body i
 	return r.client.Put(ctx, blobKey(digest), body, size)
 }
 
+// BlobExists reports whether a blob with the given digest exists.
 func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) {
 	return r.client.Exists(ctx, blobKey(digest))
 }
@@ -63,14 +66,17 @@ func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser
 	return r.client.Get(ctx, blobKey(digest))
 }
 
+// BlobSize returns the size of a blob in bytes.
 func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
 	return r.client.Head(ctx, blobKey(digest))
 }
 
+// DeleteBlob removes a blob from the object store.
 func (r *Registry) DeleteBlob(ctx context.Context, digest string) error {
 	return r.client.Delete(ctx, blobKey(digest))
 }
 
+// ManifestJSON fetches a manifest by repository name and tag.
 func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, error) {
 	body, _, err := r.client.Get(ctx, manifestKey(name, tag))
 	if err != nil {
@@ -80,6 +86,7 @@ func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, 
 	return io.ReadAll(body)
 }
 
+// ManifestJSONByDigest fetches a manifest by repository name and content digest.
 func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error) {
 	body, _, err := r.client.Get(ctx, manifestDigestKey(name, digest))
 	if err != nil {
@@ -143,11 +150,13 @@ func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) 
 	return tags, nil
 }
 
+// GetCatalog returns the parsed global catalog index.
 func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 	cat, _, err := r.GetCatalogWithDigest(ctx)
 	return cat, err
 }
 
+// GetCatalogWithDigest returns the parsed catalog and its SHA-256 digest.
 func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog, string, error) {
 	raw, err := r.getCatalogRaw(ctx)
 	if err != nil {

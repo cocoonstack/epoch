@@ -11,6 +11,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// Store provides MySQL-backed metadata queries and token management.
 type Store struct {
 	db              *sql.DB
 	mu              sync.Mutex // guards SyncFromCatalog
@@ -18,6 +19,7 @@ type Store struct {
 	lastCatalogHash string     // digest of last synced catalog.json
 }
 
+// New opens a MySQL connection, runs migrations, and returns a ready Store.
 func New(ctx context.Context, dsn string) (*Store, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -39,6 +41,7 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	return s, nil
 }
 
+// Close shuts down the database connection pool.
 func (s *Store) Close() error {
 	return s.db.Close()
 }

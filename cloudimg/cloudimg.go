@@ -13,6 +13,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// BlobReader abstracts reading a blob by digest.
 type BlobReader interface {
 	ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error)
 }
@@ -30,6 +31,7 @@ func Stream(ctx context.Context, raw []byte, blobs BlobReader, w io.Writer) erro
 	return StreamParsed(ctx, m, blobs, w)
 }
 
+// StreamParsed streams disk layers from an already-parsed manifest.
 func StreamParsed(ctx context.Context, m *manifest.OCIManifest, blobs BlobReader, w io.Writer) error {
 	disks := diskLayers(m.Layers)
 	if len(disks) == 0 {

@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	// CocoonBinaryEnv is the env var that overrides the cocoon binary path.
 	CocoonBinaryEnv  = "EPOCH_COCOON_BINARY"
 	snapshotJSONName = "snapshot.json"
 
@@ -21,16 +22,20 @@ const (
 	sparsePAXSize = "COCOON.sparse.size"
 )
 
-var errMissingSnapshotJSON = errors.New("snapshot.json not found in export stream")
+var (
+	errMissingSnapshotJSON = errors.New("snapshot.json not found in export stream")
 
-var nowFunc = time.Now // tests override
+	nowFunc = time.Now // tests override
+)
 
+// Uploader abstracts OCI blob and manifest uploads.
 type Uploader interface {
 	BlobExists(ctx context.Context, name, digest string) (bool, error)
 	PutBlob(ctx context.Context, name, digest string, body io.Reader, size int64) error
 	PutManifest(ctx context.Context, name, tag string, data []byte, contentType string) error
 }
 
+// Downloader abstracts OCI manifest and blob downloads.
 type Downloader interface {
 	GetManifest(ctx context.Context, name, tag string) ([]byte, string, error)
 	GetBlob(ctx context.Context, name, digest string) (io.ReadCloser, error)
@@ -42,16 +47,19 @@ type CocoonRunner interface {
 	Import(ctx context.Context, opts ImportOptions) (io.WriteCloser, func() error, error)
 }
 
+// ImportOptions configures a cocoon snapshot import invocation.
 type ImportOptions struct {
 	Name        string
 	Description string
 }
 
+// ExecCocoon runs the cocoon binary as a subprocess.
 type ExecCocoon struct {
 	Binary string
 	Stderr io.Writer
 }
 
+// ResolveCocoonBinary finds the cocoon binary on PATH.
 func ResolveCocoonBinary(envValue string) (string, error) {
 	bin := strings.TrimSpace(envValue)
 	if bin == "" {
@@ -64,6 +72,7 @@ func ResolveCocoonBinary(envValue string) (string, error) {
 	return resolved, nil
 }
 
+// Export streams a snapshot out of cocoon via `cocoon snapshot export`.
 func (e *ExecCocoon) Export(ctx context.Context, name string) (io.ReadCloser, func() error, error) {
 	cmd := exec.CommandContext(ctx, e.Binary, "snapshot", "export", name, "-o", "-") //nolint:gosec // Binary was validated by ResolveCocoonBinary
 	cmd.Stderr = e.stderr()
@@ -82,6 +91,7 @@ func (e *ExecCocoon) Export(ctx context.Context, name string) (io.ReadCloser, fu
 	}, nil
 }
 
+// Import starts a `cocoon snapshot import` subprocess accepting tar on stdin.
 func (e *ExecCocoon) Import(ctx context.Context, opts ImportOptions) (io.WriteCloser, func() error, error) {
 	args := []string{"snapshot", "import", "--name", opts.Name}
 	if opts.Description != "" {
@@ -90,6 +100,7 @@ func (e *ExecCocoon) Import(ctx context.Context, opts ImportOptions) (io.WriteCl
 	return e.startWithStdinPipe(ctx, args, "cocoon snapshot import")
 }
 
+// ImageImport starts a `cocoon image import` subprocess accepting data on stdin.
 func (e *ExecCocoon) ImageImport(ctx context.Context, name string) (io.WriteCloser, func() error, error) {
 	return e.startWithStdinPipe(ctx, []string{"image", "import", name}, "cocoon image import")
 }

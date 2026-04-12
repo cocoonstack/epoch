@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewRootCmd builds the top-level Epoch CLI command tree.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "epoch",
@@ -37,6 +38,7 @@ Set EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 	return root
 }
 
+// Execute runs the root command and exits on error.
 func Execute(ctx context.Context) {
 	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)

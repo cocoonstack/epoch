@@ -2,7 +2,10 @@
 package version
 
 var (
-	Version  = "dev"
+	// Version is the release version, injected at build time.
+	Version = "dev"
+	// Revision is the git commit hash, injected at build time.
 	Revision = "unknown"
-	BuiltAt  = "unknown"
+	// BuiltAt is the build timestamp, injected at build time.
+	BuiltAt = "unknown"
 )

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Repository represents a repository row with aggregated tag stats.
 type Repository struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
@@ -18,6 +19,7 @@ type Repository struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+// Tag represents a manifest tag row in the database.
 type Tag struct {
 	ID            int64         `json:"id"`
 	RepositoryID  int64         `json:"-"`
@@ -34,6 +36,7 @@ type Tag struct {
 	SyncedAt      time.Time     `json:"syncedAt"`
 }
 
+// PlatformSize stores per-platform size and layer count for image indexes.
 type PlatformSize struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
@@ -43,6 +46,7 @@ type PlatformSize struct {
 // PlatformSizes round-trips through a MySQL JSON column; empty persists as NULL.
 type PlatformSizes []PlatformSize
 
+// Value marshals PlatformSizes to JSON for MySQL storage.
 func (p PlatformSizes) Value() (driver.Value, error) {
 	if len(p) == 0 {
 		return nil, nil
@@ -50,6 +54,7 @@ func (p PlatformSizes) Value() (driver.Value, error) {
 	return json.Marshal(p)
 }
 
+// Scan unmarshals JSON from a MySQL column into PlatformSizes.
 func (p *PlatformSizes) Scan(src any) error {
 	if src == nil {
 		*p = nil
@@ -71,6 +76,7 @@ func (p *PlatformSizes) Scan(src any) error {
 	return json.Unmarshal(raw, p)
 }
 
+// Blob represents a content-addressable blob row in the database.
 type Blob struct {
 	Digest    string `json:"digest"`
 	Size      int64  `json:"size"`
@@ -78,6 +84,7 @@ type Blob struct {
 	RefCount  int    `json:"refCount"`
 }
 
+// DashboardStats holds aggregate counts for the web UI dashboard.
 type DashboardStats struct {
 	RepositoryCount int   `json:"repositoryCount"`
 	TagCount        int   `json:"tagCount"`
@@ -85,6 +92,7 @@ type DashboardStats struct {
 	TotalSize       int64 `json:"totalSize"`
 }
 
+// Token represents an API access token row in the database.
 type Token struct {
 	ID        int64      `json:"id"`
 	Name      string     `json:"name"`

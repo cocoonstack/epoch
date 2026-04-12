@@ -27,6 +27,7 @@ const (
 		"application/vnd.docker.distribution.manifest.list.v2+json"
 )
 
+// Client is an HTTP client for OCI Distribution registries.
 type Client struct {
 	baseURL    string
 	token      string
@@ -54,6 +55,7 @@ func New(baseURL, token string) *Client {
 	}
 }
 
+// BaseURL returns the registry base URL.
 func (c *Client) BaseURL() string {
 	return c.baseURL
 }
@@ -89,10 +91,12 @@ func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, str
 	return data, resp.Header.Get("Content-Type"), nil
 }
 
+// PutManifest uploads a manifest under the given tag.
 func (c *Client) PutManifest(ctx context.Context, name, tag string, data []byte, contentType string) error {
 	return c.putBytes(ctx, c.v2URL(name, "manifests", tag), contentType, bytes.NewReader(data), int64(len(data)), http.StatusCreated)
 }
 
+// BlobExists checks whether a blob with the given digest exists.
 func (c *Client) BlobExists(ctx context.Context, name, digest string) (bool, error) {
 	rawURL := c.v2URL(name, "blobs", digest)
 	resp, err := c.do(ctx, http.MethodHead, rawURL, nil, "", -1)
@@ -124,10 +128,12 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 	return resp.Body, nil
 }
 
+// PutBlob uploads a blob with the given digest.
 func (c *Client) PutBlob(ctx context.Context, name, digest string, body io.Reader, size int64) error {
 	return c.putBytes(ctx, c.v2URL(name, "blobs", digest), "application/octet-stream", body, size, http.StatusCreated)
 }
 
+// Catalog returns all repository names from /v2/_catalog.
 func (c *Client) Catalog(ctx context.Context) ([]string, error) {
 	var resp struct {
 		Repositories []string `json:"repositories"`
@@ -138,6 +144,7 @@ func (c *Client) Catalog(ctx context.Context) ([]string, error) {
 	return resp.Repositories, nil
 }
 
+// ListTags returns all tags for a repository.
 func (c *Client) ListTags(ctx context.Context, name string) ([]string, error) {
 	var resp struct {
 		Tags []string `json:"tags"`

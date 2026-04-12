@@ -28,8 +28,10 @@ type FinalizedUpload struct {
 	size int64
 }
 
+// Size returns the total byte count of the upload.
 func (f *FinalizedUpload) Size() int64 { return f.size }
 
+// Reader returns a reader positioned at the start of the upload data.
 func (f *FinalizedUpload) Reader() (io.Reader, error) {
 	if f.file == nil {
 		return nil, errors.New("finalized upload already closed")
@@ -40,6 +42,7 @@ func (f *FinalizedUpload) Reader() (io.Reader, error) {
 	return f.file, nil
 }
 
+// Close removes the underlying tempfile and releases resources.
 func (f *FinalizedUpload) Close() error {
 	if f.file == nil {
 		return nil
@@ -83,6 +86,7 @@ func newUploadSessions(dir string) *uploadSessions {
 	}
 }
 
+// Start creates a new upload session backed by a tempfile and returns its UUID.
 func (u *uploadSessions) Start() (string, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -127,12 +131,7 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	return sess.size, nil
 }
 
-func (u *uploadSessions) poisonLocked(id string, sess *uploadSession) {
-	sess.poisoned = true
-	delete(u.sessions, id)
-	closeUploadFile(sess.file)
-}
-
+// Finalize completes an upload session and returns the finalized upload.
 func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -144,6 +143,7 @@ func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	return &FinalizedUpload{file: sess.file, size: sess.size}, nil
 }
 
+// Cancel aborts an upload session and removes its tempfile.
 func (u *uploadSessions) Cancel(id string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -153,10 +153,17 @@ func (u *uploadSessions) Cancel(id string) {
 	}
 }
 
+// Len returns the number of active upload sessions.
 func (u *uploadSessions) Len() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return len(u.sessions)
+}
+
+func (u *uploadSessions) poisonLocked(id string, sess *uploadSession) {
+	sess.poisoned = true
+	delete(u.sessions, id)
+	closeUploadFile(sess.file)
 }
 
 func (u *uploadSessions) evictExpiredLocked() {

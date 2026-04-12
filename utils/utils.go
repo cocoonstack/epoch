@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// FirstNonEmpty returns the first non-blank value from the given strings.
 func FirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -17,6 +18,7 @@ func FirstNonEmpty(values ...string) string {
 	return ""
 }
 
+// SHA256Hex returns the hex-encoded SHA-256 digest of data.
 func SHA256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
@@ -37,6 +39,7 @@ func CopyBlobExact(dst io.Writer, body io.Reader, digest string, size int64) err
 	return nil
 }
 
+// HumanSize formats a byte count as a human-readable string (e.g. "1.2G").
 func HumanSize(b int64) string {
 	switch {
 	case b >= 1<<30:
@@ -50,6 +53,7 @@ func HumanSize(b int64) string {
 	}
 }
 
+// ParseRef splits "name:tag" into name and tag; defaults tag to "latest".
 func ParseRef(ref string) (string, string) {
 	if i := strings.LastIndex(ref, ":"); i > 0 {
 		return ref[:i], ref[i+1:]

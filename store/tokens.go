@@ -19,6 +19,7 @@ type tokenCacheEntry struct {
 	expires time.Time
 }
 
+// CreateToken generates a random token, stores its hash, and returns the plaintext.
 func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -34,18 +35,21 @@ func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string
 	return plaintext, nil
 }
 
+// ListTokens returns all tokens ordered by ID.
 func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 	return queryRows(ctx, s.db, `SELECT id, name, created_by, created_at, last_used FROM tokens ORDER BY id`, func(rows *sql.Rows, t *Token) error {
 		return t.scan(rows)
 	})
 }
 
+// DeleteToken removes a token by ID and invalidates the cache.
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	s.InvalidateTokenCache()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id)
 	return err
 }
 
+// ValidateToken checks whether a plaintext token is valid, using a cache.
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	logger := log.WithFunc("store.ValidateToken")
 	hash := utils.SHA256Hex([]byte(plaintext))
@@ -71,6 +75,14 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	return valid
 }
 
+// InvalidateTokenCache clears all cached token validation results.
+func (s *Store) InvalidateTokenCache() {
+	s.tokenCache.Range(func(key, _ any) bool {
+		s.tokenCache.Delete(key)
+		return true
+	})
+}
+
 func (s *Store) startTokenCacheCleanup(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(tokenCacheTTL)
@@ -90,11 +102,4 @@ func (s *Store) startTokenCacheCleanup(ctx context.Context) {
 			}
 		}
 	}()
-}
-
-func (s *Store) InvalidateTokenCache() {
-	s.tokenCache.Range(func(key, _ any) bool {
-		s.tokenCache.Delete(key)
-		return true
-	})
 }

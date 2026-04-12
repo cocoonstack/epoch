@@ -21,6 +21,7 @@ const (
 	providerOIDC   = "oidc"
 )
 
+// SSOConfig holds OAuth/OIDC provider settings for UI authentication.
 type SSOConfig struct {
 	Provider      string
 	ClientID      string
@@ -35,21 +36,7 @@ type SSOConfig struct {
 	CookieSecret  []byte
 }
 
-func parseHostedDomains(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(strings.ToLower(p))
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
+// LoadSSOConfig reads SSO provider settings from environment variables.
 func LoadSSOConfig(ctx context.Context) *SSOConfig {
 	logger := log.WithFunc("server.LoadSSOConfig")
 	provider := strings.ToLower(utils.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))
@@ -118,4 +105,19 @@ func loadProviderConfig(provider string) *SSOConfig {
 	default:
 		return nil
 	}
+}
+
+func parseHostedDomains(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(strings.ToLower(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

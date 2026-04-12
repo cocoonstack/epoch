@@ -22,6 +22,7 @@ import (
 
 const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
 
+// Server is the Epoch HTTP server providing OCI Distribution and control plane APIs.
 type Server struct {
 	reg           *registry.Registry
 	store         *store.Store
@@ -33,6 +34,7 @@ type Server struct {
 	uiHandler     http.Handler
 }
 
+// New creates a Server with routes, auth, and upload sessions configured.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
 	logger := log.WithFunc("server.New")
 	sso := LoadSSOConfig(ctx)
@@ -58,25 +60,7 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	return s
 }
 
-func resolveUploadDir(ctx context.Context) string {
-	logger := log.WithFunc("server.resolveUploadDir")
-	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
-	for _, dir := range candidates {
-		if dir == "" {
-			continue
-		}
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			logger.Warnf(ctx, "upload spool dir %q not usable, trying next: %v", dir, err)
-			continue
-		}
-		logger.Infof(ctx, "upload spool dir: %s", dir)
-		return dir
-	}
-	fallback := os.TempDir()
-	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
-	return fallback
-}
-
+// ListenAndServe starts the HTTP server and blocks until ctx is canceled.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	logger := log.WithFunc("server.ListenAndServe")
 
@@ -110,6 +94,25 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 	logger.Infof(ctx, "listening on %s", ln.Addr())
 	return serveOnListener(ctx, srv, ln)
+}
+
+func resolveUploadDir(ctx context.Context) string {
+	logger := log.WithFunc("server.resolveUploadDir")
+	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			logger.Warnf(ctx, "upload spool dir %q not usable, trying next: %v", dir, err)
+			continue
+		}
+		logger.Infof(ctx, "upload spool dir: %s", dir)
+		return dir
+	}
+	fallback := os.TempDir()
+	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
+	return fallback
 }
 
 func (s *Server) setupRoutes(ctx context.Context) {
@@ -232,6 +235,7 @@ type responseWriter struct {
 	status int
 }
 
+// WriteHeader captures the status code before delegating to the wrapped writer.
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
