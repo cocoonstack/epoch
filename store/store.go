@@ -1,7 +1,4 @@
-// Package store provides MySQL-backed metadata storage for the Epoch control plane.
-//
-// MySQL serves as an index/cache over the object-store-backed registry.
-// Object storage remains the source of truth for blobs; MySQL provides queryable metadata.
+// Package store provides MySQL-backed metadata storage. Object storage remains the source of truth.
 package store
 
 import (
@@ -14,7 +11,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// Store wraps a MySQL connection for Epoch metadata.
 type Store struct {
 	db              *sql.DB
 	mu              sync.Mutex // guards SyncFromCatalog
@@ -22,7 +18,6 @@ type Store struct {
 	lastCatalogHash string     // digest of last synced catalog.json
 }
 
-// New opens a MySQL connection and runs migrations.
 func New(ctx context.Context, dsn string) (*Store, error) {
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -97,18 +92,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("exec DDL: %w", err)
 		}
 	}
-	// Migration: drop token_plain column (ignore error if already dropped).
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens DROP COLUMN token_plain`)
-	// Migration: add artifact_type to tags (ignore error if column already exists).
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN artifact_type VARCHAR(255) NOT NULL DEFAULT ''`)
-	// Migration: add kind to tags. Stored at sync time so the UI does not
-	// need to round-trip through artifact_type → mediaType heuristics.
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT ''`)
-	// Migration: add platform_sizes JSON column for image-index tags. Each
-	// row holds the standalone (config + layers) size of one child manifest
-	// keyed by digest, materialized at sync time so the tag detail API can
-	// render real per-platform sizes without refetching every child manifest.
-	// NULL for non-index tags.
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN platform_sizes JSON NULL`)
 	return nil
 }

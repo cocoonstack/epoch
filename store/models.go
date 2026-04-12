@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// Repository is a DB repository record. ArtifactType / Kind reflect the
-// most recently pushed tag in the repo so the UI can show the artifact
-// flavor (cloud-image / snapshot / container-image) without making a
-// separate per-tag round-trip.
 type Repository struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
@@ -22,16 +18,6 @@ type Repository struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-// Tag is a DB tag record. ArtifactType captures the OCI 1.1 manifest
-// artifactType field (e.g. cocoonstack.snapshot.v1+json) so the UI can
-// show whether a tag is a snapshot, cloud image, or container image
-// without re-parsing the manifest JSON on every list call.
-//
-// PlatformSizes is populated only for tags whose kind is image-index. Each
-// entry is the standalone (config + sum(layers)) size of one child manifest,
-// keyed by the child's content digest. Materialized at sync time so the tag
-// detail API does not need to refetch every child manifest just to render
-// per-platform sizes in the UI.
 type Tag struct {
 	ID            int64         `json:"id"`
 	RepositoryID  int64         `json:"-"`
@@ -48,22 +34,15 @@ type Tag struct {
 	SyncedAt      time.Time     `json:"syncedAt"`
 }
 
-// PlatformSize is the standalone content size of one child manifest inside
-// an OCI image index — i.e. config blob plus the sum of layer blobs as
-// declared by that child, with no cross-platform deduplication. The natural
-// answer to "if I only pulled this platform, how many bytes would I download".
 type PlatformSize struct {
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
 	LayerCount int    `json:"layerCount"`
 }
 
-// PlatformSizes is a slice of [PlatformSize] that round-trips through a MySQL
-// JSON column transparently. Empty/nil persists as SQL NULL so non-index tags
-// do not store a placeholder `[]`.
+// PlatformSizes round-trips through a MySQL JSON column; empty persists as NULL.
 type PlatformSizes []PlatformSize
 
-// Value implements driver.Valuer for storing in a JSON column.
 func (p PlatformSizes) Value() (driver.Value, error) {
 	if len(p) == 0 {
 		return nil, nil
@@ -71,9 +50,6 @@ func (p PlatformSizes) Value() (driver.Value, error) {
 	return json.Marshal(p)
 }
 
-// Scan implements sql.Scanner for reading back from a JSON column. NULL maps
-// to a nil slice; the column is allowed to be string or []byte depending on
-// driver flags.
 func (p *PlatformSizes) Scan(src any) error {
 	if src == nil {
 		*p = nil
@@ -95,7 +71,6 @@ func (p *PlatformSizes) Scan(src any) error {
 	return json.Unmarshal(raw, p)
 }
 
-// Blob is a DB blob record.
 type Blob struct {
 	Digest    string `json:"digest"`
 	Size      int64  `json:"size"`
@@ -103,7 +78,6 @@ type Blob struct {
 	RefCount  int    `json:"refCount"`
 }
 
-// DashboardStats holds aggregate stats for the UI dashboard.
 type DashboardStats struct {
 	RepositoryCount int   `json:"repositoryCount"`
 	TagCount        int   `json:"tagCount"`
@@ -111,8 +85,6 @@ type DashboardStats struct {
 	TotalSize       int64 `json:"totalSize"`
 }
 
-// Token is a registry access token.
-// The Token field is only populated on create (returned to caller); it is never read back from the DB.
 type Token struct {
 	ID        int64      `json:"id"`
 	Name      string     `json:"name"`

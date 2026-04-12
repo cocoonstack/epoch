@@ -12,19 +12,7 @@ import (
 	"github.com/cocoonstack/epoch/snapshot"
 )
 
-// handleArtifactDownload streams a cocoonstack artifact's bytes by repository
-// name. The handler classifies the manifest at <name>:latest and serves:
-//
-//   - cloud images  → concatenated raw disk bytes (application/octet-stream).
-//     `cocoon image pull https://epoch.example/dl/<name>` consumes
-//     this directly.
-//   - snapshots     → cocoon-import tar (application/x-tar) — exactly what
-//     `cocoon snapshot import` reads from stdin. Pipeable as
-//     `curl https://epoch.example/dl/<name> | cocoon snapshot import --name <name>`.
-//   - container images / unknown → 405.
-//
-// Both flows are auth-exempt by design (vk-cocoon and other consumers can
-// pull without holding a registry token).
+// handleArtifactDownload streams a cloud image or snapshot by name. Auth-exempt.
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	logger := log.WithFunc("server.handleArtifactDownload")
@@ -59,10 +47,6 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// streamCloudImage writes a cloud-image manifest's concatenated disk bytes
-// to w. After WriteHeader we cannot turn an error into an HTTP status; the
-// best we can do is log and stop streaming so the client sees a truncated
-// body.
 func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest, logger *log.Fields) {
 	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.WriteHeader(http.StatusOK)
@@ -72,10 +56,6 @@ func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name s
 	}
 }
 
-// streamSnapshot writes a snapshot manifest as the cocoon-import tar
-// (snapshot.json envelope plus one tar entry per OCI layer). The downloader
-// adapter wraps the in-process registry so snapshot.StreamParsed can fetch
-// the config blob and layer bodies the same way the HTTP-side puller would.
 func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest, logger *log.Fields) {
 	w.Header().Set("Content-Type", manifest.MediaTypeTar)
 	w.WriteHeader(http.StatusOK)
@@ -89,16 +69,10 @@ func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name str
 	}
 }
 
-// registryBlobReader adapts the in-process *registry.Registry to
-// cloudimg.BlobReader. It strips the `sha256:` prefix from descriptor digests
-// because the registry stores blobs under their unprefixed hex digest.
 type registryBlobReader struct {
 	reg blobStreamer
 }
 
-// blobStreamer is the subset of *registry.Registry needed by the in-process
-// blob adapters. Defined as an interface so server tests can substitute fakes
-// without spinning up an object store.
 type blobStreamer interface {
 	StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error)
 }
@@ -108,23 +82,13 @@ func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.Re
 	return body, err
 }
 
-// registryDownloader adapts the in-process *registry.Registry to
-// snapshot.Downloader, the same way registryBlobReader adapts it to
-// cloudimg.BlobReader. It re-serves the already-fetched manifest bytes from
-// memory so snapshot.StreamParsed does not pay for a second S3 round-trip.
-//
-// The tag parameter in GetManifest is ignored — the /dl/{name} handler
-// always fetches "latest" before constructing this adapter, and the cached
-// manifestRaw is what StreamParsed will read. If a caller ever needs
-// non-latest, this adapter must be extended to accept and propagate tags.
+// registryDownloader adapts *registry.Registry to snapshot.Downloader.
 type registryDownloader struct {
 	reg          manifestStreamer
 	manifestName string
 	manifestRaw  []byte
 }
 
-// manifestStreamer is the subset of *registry.Registry needed by
-// registryDownloader.
 type manifestStreamer interface {
 	blobStreamer
 	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)

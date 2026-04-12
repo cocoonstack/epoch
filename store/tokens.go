@@ -61,9 +61,6 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	s.tokenCache.Store(hash, tokenCacheEntry{valid: valid, expires: time.Now().Add(tokenCacheTTL)})
 
 	if valid {
-		// Detach from the request ctx so a client disconnect cannot abort
-		// the last_used write mid-flight; this goroutine is intentionally
-		// fire-and-forget and must outlive the caller.
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
 			if _, err := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
@@ -95,7 +92,6 @@ func (s *Store) startTokenCacheCleanup(ctx context.Context) {
 	}()
 }
 
-// InvalidateTokenCache clears all cached token validations.
 func (s *Store) InvalidateTokenCache() {
 	s.tokenCache.Range(func(key, _ any) bool {
 		s.tokenCache.Delete(key)

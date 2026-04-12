@@ -1,4 +1,3 @@
-// Package ui embeds the frontend static files.
 package ui
 
 import "embed"

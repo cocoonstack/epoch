@@ -1,21 +1,6 @@
-// Package registry implements the storage layer of the Epoch OCI registry.
-//
-// It is intentionally vendor-agnostic: cocoonstack-specific concepts (cloud
-// images, snapshots) live in the [snapshot] and [cloudimg] packages on top
-// of these primitives. The registry only knows how to store and retrieve
-// blobs and manifests in an S3-compatible object store, plus maintain a
-// global catalog index for the control-plane API.
-//
-// Object layout in the bucket (under the configured prefix, default `epoch/`):
-//
-//	catalog.json                            — global repository index
-//	manifests/<name>/<tag>.json             — manifest by tag
-//	manifests/<name>/_digests/<dgst>.json   — manifest by content digest
-//	blobs/sha256/<dgst>                     — content-addressable blob
-//
-// All blobs are stored under their unprefixed hex digest. Callers that have
-// a `sha256:<hex>` form must strip the prefix before calling [Registry.StreamBlob],
-// [Registry.PullBlob], etc.
+// Package registry stores and retrieves OCI blobs and manifests in S3,
+// plus maintains a global catalog index. Vendor-agnostic; cocoonstack
+// concepts live in the snapshot and cloudimg packages.
 package registry
 
 import (
@@ -36,8 +21,7 @@ import (
 
 const catalogCacheTTL = 10 * time.Second
 
-// Registry is the storage facade for an Epoch OCI registry. It is safe for
-// concurrent use.
+// Registry is the storage facade. Safe for concurrent use.
 type Registry struct {
 	client *objectstore.Client
 
@@ -46,12 +30,10 @@ type Registry struct {
 	catalogExpiry time.Time  // expiry of catalogCache
 }
 
-// New creates a registry backed by the given object store client.
 func New(client *objectstore.Client) *Registry {
 	return &Registry{client: client}
 }
 
-// NewFromEnv creates a registry using object store credentials from the environment.
 func NewFromEnv() (*Registry, error) {
 	cfg, err := objectstore.ConfigFromEnv("epoch/")
 	if err != nil {
@@ -64,11 +46,7 @@ func NewFromEnv() (*Registry, error) {
 	return New(client), nil
 }
 
-// --- Blob operations ---
-
-// PushBlobFromStream uploads a blob whose digest the caller has already
-// computed. The digest must be the unprefixed lowercase hex SHA-256.
-// Existing blobs are deduplicated.
+// PushBlobFromStream uploads a blob, deduplicating if it already exists.
 func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body io.Reader, size int64) error {
 	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
 		return nil
@@ -76,30 +54,23 @@ func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body i
 	return r.client.Put(ctx, blobKey(digest), body, size)
 }
 
-// BlobExists checks if a blob exists. The digest must be unprefixed hex.
 func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) {
 	return r.client.Exists(ctx, blobKey(digest))
 }
 
-// StreamBlob returns a streaming reader for a blob and its size.
-// Caller must close the returned ReadCloser. The digest must be unprefixed hex.
+// StreamBlob returns a streaming reader and size. Caller must close the reader.
 func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error) {
 	return r.client.Get(ctx, blobKey(digest))
 }
 
-// BlobSize returns the size of a blob without fetching its body.
 func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
 	return r.client.Head(ctx, blobKey(digest))
 }
 
-// DeleteBlob removes a blob from the object store.
 func (r *Registry) DeleteBlob(ctx context.Context, digest string) error {
 	return r.client.Delete(ctx, blobKey(digest))
 }
 
-// --- Manifest operations ---
-
-// ManifestJSON returns the raw JSON bytes of a manifest looked up by tag.
 func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, error) {
 	body, _, err := r.client.Get(ctx, manifestKey(name, tag))
 	if err != nil {
@@ -109,10 +80,6 @@ func (r *Registry) ManifestJSON(ctx context.Context, name, tag string) ([]byte, 
 	return io.ReadAll(body)
 }
 
-// ManifestJSONByDigest returns the raw JSON bytes of a manifest looked up by
-// content digest. OCI clients (go-containerregistry, docker, buildah) push by
-// tag and then re-fetch by digest after resolving — this read path is what
-// closes that loop.
 func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error) {
 	body, _, err := r.client.Get(ctx, manifestDigestKey(name, digest))
 	if err != nil {
@@ -122,11 +89,7 @@ func (r *Registry) ManifestJSONByDigest(ctx context.Context, name, digest string
 	return io.ReadAll(body)
 }
 
-// PushManifestJSON uploads a manifest from raw JSON bytes and updates the
-// catalog. The bytes are written under both the tag key and the content
-// digest key, so the manifest can later be fetched by either reference. The
-// digest write happens first (it is idempotent and content-addressed), so a
-// failure between writes leaves no dangling tag pointer.
+// PushManifestJSON uploads a manifest under both the tag and digest keys, then updates the catalog.
 func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data []byte) error {
 	if _, err := r.PushManifestJSONByDigest(ctx, name, data); err != nil {
 		return err
@@ -139,15 +102,8 @@ func (r *Registry) PushManifestJSON(ctx context.Context, name, tag string, data 
 	return r.updateCatalog(ctx, name, tag)
 }
 
-// PushManifestJSONByDigest stores a manifest under its content digest only.
-// Unlike PushManifestJSON it neither writes a tag entry nor touches the
-// catalog: by-digest pushes are how OCI clients pre-load child manifests of
-// a multi-arch image index before pushing the index itself by tag, and
-// recording each child as a tag would pollute the catalog with sha256:*
-// entries that are not user-visible references.
-//
-// Returns the computed `sha256:<hex>` digest so the caller can echo it in
-// the response and verify it against a digest reference if present.
+// PushManifestJSONByDigest stores a manifest by digest only (no tag, no catalog update).
+// Used for OCI index child manifests. Returns the computed digest.
 func (r *Registry) PushManifestJSONByDigest(ctx context.Context, name string, data []byte) (string, error) {
 	digest := "sha256:" + utils.SHA256Hex(data)
 
@@ -158,9 +114,7 @@ func (r *Registry) PushManifestJSONByDigest(ctx context.Context, name string, da
 	return digest, nil
 }
 
-// DeleteManifest removes a manifest tag and updates the catalog. The
-// content-addressed copy under `_digests/` is intentionally left in place so
-// re-tagging by digest still works.
+// DeleteManifest removes a manifest tag and updates the catalog.
 func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	if err := r.client.Delete(ctx, manifestKey(name, tag)); err != nil {
 		return err
@@ -168,9 +122,7 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	return r.removeCatalogEntry(ctx, name, tag)
 }
 
-// ListTags returns all tags for a repository. Manifests stored under the
-// per-name `_digests/` subdirectory (the by-digest copies) are skipped — they
-// are content-addressed pointers to the same data, not user-facing tags.
+// ListTags returns all tags for a repository, skipping by-digest copies.
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
 	keys, err := r.client.List(ctx, "manifests/"+name+"/")
 	if err != nil {
@@ -191,15 +143,11 @@ func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) 
 	return tags, nil
 }
 
-// --- Catalog operations ---
-
-// GetCatalog returns the global catalog.
 func (r *Registry) GetCatalog(ctx context.Context) (*manifest.Catalog, error) {
 	cat, _, err := r.GetCatalogWithDigest(ctx)
 	return cat, err
 }
 
-// GetCatalogWithDigest returns the catalog together with the SHA-256 digest of its raw JSON.
 func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog, string, error) {
 	raw, err := r.getCatalogRaw(ctx)
 	if err != nil {
@@ -220,18 +168,14 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 	return &cat, utils.SHA256Hex(raw), nil
 }
 
-// getCatalogRaw returns the raw catalog JSON bytes, populating the cache on
-// miss. Acquires the catalog mutex; do not call from a context where the
-// mutex is already held — use getCatalogRawLocked instead.
+// getCatalogRaw acquires catalogMu; use getCatalogRawLocked if already held.
 func (r *Registry) getCatalogRaw(ctx context.Context) ([]byte, error) {
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 	return r.getCatalogRawLocked(ctx)
 }
 
-// getCatalogRawLocked is the cache-aware catalog reader. The caller must hold
-// r.catalogMu — this is what lets updateCatalog and removeCatalogEntry call it
-// without re-entering the (non-reentrant) mutex.
+// getCatalogRawLocked reads catalog bytes with cache. Caller must hold catalogMu.
 func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 	if r.catalogCache != nil && time.Now().Before(r.catalogExpiry) {
 		return r.catalogCache, nil
@@ -256,7 +200,6 @@ func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 	return raw, nil
 }
 
-// getCatalogLocked returns the parsed catalog. Caller must hold r.catalogMu.
 func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, error) {
 	raw, err := r.getCatalogRawLocked(ctx)
 	if err != nil {
@@ -275,9 +218,6 @@ func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, err
 	return &cat, nil
 }
 
-// invalidateCatalogCacheLocked drops the cached catalog. Caller must hold
-// r.catalogMu — the function name and the locked-suffix convention exist to
-// match the rest of the catalog accessors and prevent re-entrancy bugs.
 func (r *Registry) invalidateCatalogCacheLocked() {
 	r.catalogCache = nil
 	r.catalogExpiry = time.Time{}
@@ -335,8 +275,6 @@ func (r *Registry) putCatalog(ctx context.Context, cat *manifest.Catalog) error 
 	return nil
 }
 
-// --- Key helpers ---
-
 func blobKey(digest string) string {
 	return "blobs/sha256/" + digest
 }
@@ -345,9 +283,7 @@ func manifestKey(name, tag string) string {
 	return "manifests/" + name + "/" + tag + ".json"
 }
 
-// manifestDigestKey is the object store key for a manifest looked up by its
-// content digest. The colon in `sha256:abc...` is replaced with a dash so the
-// key works on object stores that disallow colons in path components.
+// manifestDigestKey replaces the colon in the digest with a dash for object store compatibility.
 func manifestDigestKey(name, digest string) string {
 	return "manifests/" + name + "/_digests/" + strings.ReplaceAll(digest, ":", "-") + ".json"
 }

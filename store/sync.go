@@ -18,38 +18,11 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// indexFetchConcurrency caps the number of in-flight child-manifest fetches
-// when expanding an OCI image index. Bounded so a 100-platform index does
-// not spawn 100 simultaneous S3 round-trips and so the underlying object
-// store client's connection pool stays predictable. 4 is a reasonable
-// default for typical multi-arch images (linux/amd64 + linux/arm64 +
-// optional attestations).
 const indexFetchConcurrency = 4
 
-// errSyncInProgress signals that another goroutine is already running
-// SyncFromCatalog. Returned (and silently swallowed by background callers)
-// instead of blocking on the mutex.
 var errSyncInProgress = errors.New("sync already in progress")
 
-// SyncFromCatalog walks the registry catalog and ingests every (repo, tag)
-// into MySQL. Each tag's manifest is parsed as OCI and indexed by digest,
-// artifactType, and aggregate size. Orphaned rows (repos / tags that no
-// longer appear in the catalog) are deleted in a second pass.
-//
-// Sync is split into two phases so the write transaction never holds while
-// epoch is talking to remote object storage:
-//
-//  1. prepareSync — read existing tag state from MySQL, fetch + parse +
-//     aggregate every catalog tag from the registry. No write TX is open,
-//     so the seconds spent on S3 round-trips do not block concurrent
-//     writers (token last_used updates, tag deletes, etc).
-//  2. commitSync — open one short write TX and upsert every prepared
-//     repo / tag / blob. The lock window stays in milliseconds even when
-//     phase 1 took seconds.
-//
-// Per-tag failures stay non-fatal so one bad manifest does not abort the
-// whole pass. Context cancellation during phase 1 aborts the pass before
-// any writes are issued.
+// SyncFromCatalog ingests catalog entries into MySQL. Per-tag failures are non-fatal.
 func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) error {
 	if !s.mu.TryLock() {
 		return errSyncInProgress
@@ -80,19 +53,12 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	return nil
 }
 
-// pendingTag is the in-memory result of [prepareSync] — everything
-// [commitSync] needs to upsert one tag without doing any further remote I/O.
 type pendingTag struct {
 	repoName    string
 	tag         Tag
 	descriptors []manifest.Descriptor
 }
 
-// prepareSync iterates the catalog and produces one [pendingTag] per
-// (repo, tag) that actually needs to be written. Unchanged tags (digest
-// matches the cached row and no platform_sizes backfill is owed) are
-// filtered out here so commitSync's TX stays minimal. No DB writes happen
-// in this phase — the only DB touch is the per-tag read in getTagSyncState.
 func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry, logger *log.Fields) ([]pendingTag, error) {
 	var pending []pendingTag
 	for repoName, repo := range cat.Repositories {
@@ -110,10 +76,6 @@ func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *reg
 	return pending, nil
 }
 
-// prepareTag fetches a single manifest, parses it, and aggregates the
-// totals. Returns ok=false when the tag is unchanged (fast path) or when
-// fetching / parsing failed and was already logged. Lives entirely outside
-// any TX so its remote round-trips do not hold a database lock.
 func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName, tagName string, logger *log.Fields) (pendingTag, bool) {
 	existing, dbErr := s.getTagSyncState(ctx, repoName, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
@@ -126,11 +88,7 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 		return pendingTag{}, false
 	}
 
-	// Image-index tags synced before the platform_sizes column existed have
-	// platform_sizes = NULL forever otherwise: their manifest digest is stable
-	// upstream, so the unchanged-digest fast path below would skip them. Force
-	// one resync per such tag to backfill the new column; subsequent runs hit
-	// the fast path normally.
+	// Force resync for index tags missing platform_sizes (backfill).
 	digest := utils.SHA256Hex(raw)
 	needsPlatformBackfill := existing.kind == manifest.KindImageIndex.String() && !existing.hasPlatformSizes
 	if digest == existing.digest && !needsPlatformBackfill {
@@ -163,10 +121,6 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 	}, true
 }
 
-// commitSync writes every pending tag inside one short transaction.
-// Repositories are upserted first (deduped) so each tag row has a parent
-// ID; tag and blob upserts then run in catalog order. Per-tag failures
-// stay non-fatal so one broken row does not roll back the whole pass.
 func (s *Store) commitSync(ctx context.Context, pending []pendingTag, logger *log.Fields) error {
 	if len(pending) == 0 {
 		return nil
@@ -210,18 +164,7 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag, logger *lo
 	return nil
 }
 
-// tagAggregates returns (totalSize, layerCount, descriptors, platformSizes)
-// for the given manifest. For image manifests this is just config + layers
-// and platformSizes is nil. For image indexes it walks each child manifest
-// by digest, dedupes shared blobs across platforms for the totalSize union
-// (most multi-arch images publish per-arch layers, but shared base layers
-// and configs identical across arches collapse to a single counted byte),
-// and additionally returns the per-child standalone size in platformSizes
-// without that cross-platform dedup.
-//
-// layerCount for an index is the number of platform manifests it references
-// (the natural answer to "how many things compose this tag" when the tag is
-// multi-arch). Per-platform layer counts are carried inside platformSizes.
+// tagAggregates returns totals for a manifest; for indexes, dedupes across platforms.
 func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
 	if kind == manifest.KindImageIndex {
 		return expandIndexAggregates(ctx, reg, repoName, m, logger)
@@ -234,19 +177,6 @@ func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string,
 	return totalSize, len(m.Layers), descriptors, nil
 }
 
-// expandIndexAggregates fetches every child manifest of an image index and
-// returns the aggregated totals plus a per-child standalone size list. The
-// totalSize dedupes shared blobs across platforms; the per-child entries in
-// platformSizes do NOT — they answer "if I only pulled this platform, how
-// big is it" and are what the UI surfaces in the Platforms table. Failures
-// fetching a single child are logged and skipped — partial aggregates are
-// better than refusing to sync the whole tag because one platform's manifest
-// is unreachable.
-//
-// The fetch phase runs in parallel up to [indexFetchConcurrency] workers
-// because a multi-arch index can otherwise serialize N S3 round-trips on a
-// single sync pass. The aggregate phase is serialized to keep the descriptor
-// ordering and dedup map race-free.
 func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
 	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests, logger)
 
@@ -281,18 +211,11 @@ func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName
 	return totalSize, len(m.Manifests), descriptors, platformSizes
 }
 
-// fetchedChild carries one parallel-fetched child manifest of an index.
-// Stored at a fixed slot in fetchIndexChildren's result slice so the
-// aggregate walk preserves the original platform order from the index.
 type fetchedChild struct {
 	digest string
 	parsed *manifest.OCIManifest
 }
 
-// fetchIndexChildren downloads and parses every child manifest of an image
-// index in parallel under a fixed-size worker semaphore. Returns a slice
-// where index i corresponds to children[i]; nil entries mean that child
-// failed to fetch or parse and was already logged.
 func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest, logger *log.Fields) []*fetchedChild {
 	results := make([]*fetchedChild, len(children))
 	if len(children) == 0 {
@@ -325,21 +248,12 @@ func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName st
 	return results
 }
 
-// tagSyncState captures the slice of an existing tag row that prepareTag
-// needs to decide whether to skip recomputation. hasPlatformSizes is the
-// NOT NULL presence flag (not the slice itself) because prepareTag only
-// needs to know "is this row missing its index materialization" — pulling
-// the actual JSON would be wasted I/O on every sync pass.
 type tagSyncState struct {
 	digest           string
 	kind             string
 	hasPlatformSizes bool
 }
 
-// getTagSyncState looks up the existing row for one (repoName, tagName)
-// pair via a JOIN against repositories. Phase 1 of sync runs before any
-// repository upsert has happened, so callers do not yet know the row's
-// repository_id; the JOIN keeps the read path repoName-keyed throughout.
 func (s *Store) getTagSyncState(ctx context.Context, repoName, tagName string) (tagSyncState, error) {
 	var st tagSyncState
 	err := s.db.QueryRowContext(ctx,
@@ -375,9 +289,6 @@ func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
 	return err
 }
 
-// manifestPushedAt returns the manifest's `org.opencontainers.image.created`
-// annotation parsed as RFC 3339, or the current time if the annotation is
-// missing or unparseable.
 func manifestPushedAt(m *manifest.OCIManifest) time.Time {
 	if v, ok := m.Annotations[manifest.AnnotationCreated]; ok {
 		if ts, err := time.Parse(time.RFC3339, v); err == nil {
@@ -387,11 +298,6 @@ func manifestPushedAt(m *manifest.OCIManifest) time.Time {
 	return time.Now().UTC()
 }
 
-// batchUpsertBlobsTx records every descriptor referenced by a manifest into
-// the blobs table so the UI / control plane has a single index of every
-// content-addressable object in the registry. Failures are not fatal — the
-// caller logs and continues so an unindexed blob does not block the tag
-// upsert.
 func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, descriptors []manifest.Descriptor) error {
 	if len(descriptors) == 0 {
 		return nil
@@ -419,11 +325,6 @@ func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, descriptors []manifest.
 func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 	logger := log.WithFunc("store.cleanOrphans")
 
-	// One LEFT JOIN replaces the previous N+1 (one SELECT-tags-per-repo) so
-	// large registries pay a single round-trip for the whole orphan scan.
-	// The LEFT JOIN keeps empty repositories in the result set so they can
-	// still be garbage-collected when they disappear from the catalog; rows
-	// for empty repos come back with a NULL tag name.
 	type repoTagRow struct {
 		repoID   int64
 		repoName string
@@ -461,8 +362,6 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 	for _, r := range repos {
 		catRepo, exists := cat.Repositories[r.name]
 		if !exists {
-			// Tags are removed via ON DELETE CASCADE on repository_id, so the
-			// per-tag loop below can skip orphan repos entirely.
 			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, r.id); delErr != nil {
 				logger.Warnf(ctx, "delete orphan repository %s: %v", r.name, delErr)
 			}

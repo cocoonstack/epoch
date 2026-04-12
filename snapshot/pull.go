@@ -15,34 +15,20 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// Puller fetches a snapshot OCI artifact and pipes it into
-// `cocoon snapshot import`.
 type Puller struct {
 	Downloader Downloader
 	Cocoon     CocoonRunner
 }
 
-// PullOptions configures a snapshot pull.
 type PullOptions struct {
-	// Name is the OCI repository name. Required.
-	Name string
-	// Tag is the OCI tag. Defaults to "latest".
-	Tag string
-	// LocalName overrides the cocoon-side snapshot name on import.
-	// Empty means reuse Name.
-	LocalName string
-	// Description is forwarded to `cocoon snapshot import --description`.
+	Name        string
+	Tag         string
+	LocalName   string // overrides cocoon-side snapshot name; empty = use Name
 	Description string
-	// Progress receives one-line status updates. May be nil.
-	Progress func(string)
+	Progress    func(string)
 }
 
-// Pull downloads a snapshot artifact from the registry, reassembles its
-// layers into a tar stream, and feeds it to `cocoon snapshot import`.
-//
-// Errors during streaming close the cocoon stdin pipe so the import process
-// observes EOF and exits cleanly; the original streaming error wins over the
-// downstream wait error.
+// Pull downloads a snapshot artifact and feeds it to `cocoon snapshot import`.
 func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	if opts.Name == "" {
 		return errors.New("snapshot pull: name is required")
@@ -88,29 +74,14 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	return nil
 }
 
-// StreamOptions configures [Stream].
 type StreamOptions struct {
-	// Name is the OCI repository name used to fetch layer blobs. Required.
-	Name string
-	// LocalName overrides the snapshot name written into the rebuilt
-	// snapshot.json envelope. Empty falls back to Name so the importer
-	// reuses the registry repository name.
-	LocalName string
-	// Writer is the destination for the cocoon-import-shaped tar stream.
-	// Required.
-	Writer io.Writer
-	// Progress receives one-line status updates per layer. May be nil.
-	Progress func(string)
+	Name      string
+	LocalName string // empty = use Name
+	Writer    io.Writer
+	Progress  func(string)
 }
 
-// Stream classifies the manifest as a snapshot, fetches its config blob, and
-// writes the cocoon-import tar (snapshot.json envelope + every layer entry)
-// to opts.Writer. It is the function shared between snapshot.Puller (which
-// writes to cocoon's stdin) and epoch's server-side /dl/{name} handler
-// (which writes to the HTTP response body).
-//
-// Stream does not invoke cocoon — it only reassembles the tar. The caller is
-// responsible for piping the bytes to wherever they should land.
+// Stream reassembles a snapshot manifest into a cocoon-import tar stream.
 func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
 		return errors.New("snapshot stream: name is required")
@@ -130,9 +101,7 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	return StreamParsed(ctx, m, dl, opts)
 }
 
-// StreamParsed is the same as [Stream] but accepts an already-parsed manifest.
-// Callers that have already classified and parsed the manifest (e.g. the /dl/
-// handler) use this to avoid a redundant JSON unmarshal.
+// StreamParsed accepts an already-parsed manifest.
 func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
 		return errors.New("snapshot stream: name is required")
@@ -153,9 +122,6 @@ func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, o
 	return writeImportTar(ctx, dl, opts.Name, localName, cfg, m.Layers, opts.Writer, opts.Progress)
 }
 
-// writeImportTar serializes a snapshot to the cocoon-import tar layout:
-// snapshot.json envelope first, then one tar entry per OCI layer in
-// manifest order with the layer's title annotation as the entry name.
 func writeImportTar(ctx context.Context, dl Downloader, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {
 	bw := bufio.NewWriterSize(w, 256<<10)
 	tw := tar.NewWriter(bw)
@@ -211,14 +177,7 @@ func writeImportTar(ctx context.Context, dl Downloader, name, localName string, 
 	return bw.Flush()
 }
 
-// FetchSnapshotConfig downloads and parses the snapshot config blob referenced
-// by the given descriptor. Exported so the in-process tag-detail API can reuse
-// it via the same Downloader adapter that snapshot.StreamParsed already uses,
-// instead of duplicating the parse/stream/decode dance.
-//
-// Returns an error when desc.MediaType is not [manifest.MediaTypeSnapshotConfig]
-// — that should never happen for a tag the catalog has classified as a
-// snapshot, so callers can treat it as corrupt state and surface it.
+// FetchSnapshotConfig downloads and parses the snapshot config blob.
 func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
 	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
 		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
@@ -239,11 +198,6 @@ func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 	return &cfg, nil
 }
 
-// streamLayerToTar fetches a layer blob and writes it as a tar entry whose
-// name is the layer's `org.opencontainers.image.title` annotation. The tar
-// header advertises layer.Size, so the body MUST match exactly: too few
-// bytes corrupts the tar stream cocoon reads, too many means the registry
-// served the wrong blob.
 func streamLayerToTar(ctx context.Context, dl Downloader, name string, layer manifest.Descriptor, fileMeta manifest.SnapshotFile, tw *tar.Writer, modTime time.Time) error {
 	mode := fileMeta.Mode
 	if mode == 0 {

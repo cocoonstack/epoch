@@ -10,17 +10,8 @@ import (
 	"strconv"
 )
 
-// uploadBodyLimit caps any single PATCH/PUT body. The actual cap on a full
-// upload is enforced by uploadSessions.maxBytes; this is just a per-request
-// safety net so a single PATCH cannot read forever. Kept aligned with
-// defaultUploadMaxBytes so the per-request and per-session limits agree.
 const uploadBodyLimit = defaultUploadMaxBytes
 
-// v2InitBlobUpload handles `POST /v2/{name}/blobs/uploads/`.
-//
-// If the request includes `?digest=sha256:xxx`, the body is treated as a
-// monolithic upload (POST contains the entire blob). Otherwise a new chunked
-// upload session is started and the client is told where to PATCH.
 func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 
@@ -40,8 +31,6 @@ func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// v2PatchBlobUpload handles `PATCH /v2/{name}/blobs/uploads/{uuid}` — append
-// a chunk to an in-progress upload session.
 func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	id := urlVar(r, "uuid")
@@ -60,11 +49,6 @@ func (s *Server) v2PatchBlobUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// v2CompleteBlobUpload handles `PUT /v2/{name}/blobs/uploads/{uuid}?digest=sha256:xxx`.
-// Any trailing body is appended, the assembled tempfile is digest-verified
-// via a streaming pass, and the blob is then streamed to the object store.
-// The session is removed on every error path so an abandoned or failed
-// upload does not pin disk space.
 func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	id := urlVar(r, "uuid")
@@ -86,10 +70,6 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Finalize transfers tempfile ownership to fu under u.mu, so the only
-	// possible error here is errUploadNotFound — which means the session was
-	// already evicted (TTL or rollback poisoning) and there is nothing left
-	// to clean up.
 	fu, err := s.uploads.Finalize(id)
 	if err != nil {
 		writeUploadAppendError(w, err)
@@ -100,10 +80,6 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 	s.persistVerifiedBlob(w, r, name, digest, fu)
 }
 
-// persistMonolithicUpload handles the single-POST flow where the entire blob
-// arrives in the body of `POST .../uploads/?digest=...`. It re-uses the
-// upload session machinery so the body streams to a tempfile rather than
-// being held in RAM.
 func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
 	id, err := s.uploads.Start()
 	if err != nil {
@@ -117,9 +93,6 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 		writeUploadAppendError(w, appendErr)
 		return
 	}
-	// Finalize can only return errUploadNotFound, which here means rollback
-	// poisoning evicted the session — the tempfile is already gone, so no
-	// extra Cancel is needed.
 	fu, err := s.uploads.Finalize(id)
 	if err != nil {
 		drainBody(body)
@@ -131,10 +104,7 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 	s.persistVerifiedBlob(w, r, name, digest, fu)
 }
 
-// persistVerifiedBlob is the shared finalize step for both push flows. It
-// makes two streaming passes over the upload tempfile: first to verify the
-// SHA-256 matches the declared digest, second to stream the bytes to the
-// object store. Neither pass copies the blob into memory.
+// persistVerifiedBlob verifies the digest then streams to the object store.
 func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, name, digest string, fu *FinalizedUpload) {
 	rdr, err := fu.Reader()
 	if err != nil {
@@ -168,12 +138,10 @@ func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, nam
 	w.WriteHeader(http.StatusCreated)
 }
 
-// uploadLocation builds the Location header value for an in-progress upload.
 func uploadLocation(name, id string) string {
 	return fmt.Sprintf("/v2/%s/blobs/uploads/%s", name, id)
 }
 
-// writeUploadAppendError translates upload-session errors to OCI v2 responses.
 func writeUploadAppendError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errUploadNotFound):
@@ -185,11 +153,6 @@ func writeUploadAppendError(w http.ResponseWriter, err error) {
 	}
 }
 
-// drainBody discards up to uploadBodyLimit bytes from body so the underlying
-// TCP connection can be reused (HTTP keep-alive). The cap is required: a
-// malicious client could otherwise stream unbounded bytes on an error path
-// and pin a handler goroutine. Callers pass the already-LimitReader-wrapped
-// body so a misconfigured limit cannot accidentally bypass the cap.
 func drainBody(body io.Reader) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, uploadBodyLimit))
 }

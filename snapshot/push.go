@@ -18,32 +18,20 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// Pusher uploads cocoon VM snapshots into an OCI registry.
 type Pusher struct {
 	Uploader Uploader
 	Cocoon   CocoonRunner
 }
 
-// PushOptions configures a snapshot push.
 type PushOptions struct {
-	// Name is the OCI repository name. Required.
-	Name string
-	// Tag is the OCI tag. Defaults to "latest".
-	Tag string
-	// BaseImage is the optional cocoonstack.snapshot.baseimage annotation
-	// value (an OCI ref like "ghcr.io/cocoonstack/cocoon/ubuntu:24.04").
-	// When empty the annotation is omitted.
-	BaseImage string
-	// Source identifies the producer in the manifest annotations
-	// (org.opencontainers.image.source). Optional.
-	Source string
-	// Revision is the org.opencontainers.image.revision annotation. Optional.
+	Name      string
+	Tag       string
+	BaseImage string // optional cocoonstack.snapshot.baseimage annotation
+	Source    string
 	Revision string
-	// Progress receives one-line status updates. May be nil.
 	Progress func(string)
 }
 
-// PushResult summarizes a successful snapshot push.
 type PushResult struct {
 	Name           string
 	Tag            string
@@ -53,17 +41,7 @@ type PushResult struct {
 	LayerCount     int
 }
 
-// Push streams a snapshot from `cocoon snapshot export` and writes an OCI
-// snapshot artifact to the registry.
-//
-// The data flow is:
-//  1. start `cocoon snapshot export <name> -o -`
-//  2. read tar entries from its stdout, hashing each one to a temp file and
-//     uploading as a content-addressable blob
-//  3. translate the snapshot.json envelope into a snapshot config blob
-//     (mediaType vnd.cocoonstack.snapshot.config.v1+json) and upload it
-//  4. assemble an OCI image manifest with artifactType
-//     vnd.cocoonstack.snapshot.v1+json and PUT it under name:tag
+// Push exports a snapshot via cocoon and uploads it as an OCI artifact.
 func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 	if opts.Name == "" {
 		return nil, errors.New("snapshot push: name is required")
@@ -78,12 +56,7 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 	}
 
 	cfg, files, layers, readErr := p.readAndUploadEntries(ctx, opts.Name, stream, opts.Progress)
-	// Close the read side of the export pipe BEFORE waiting on the
-	// subprocess. If readAndUploadEntries bailed out mid-tar, the cocoon
-	// child is still trying to write to its stdout pipe; closing our read
-	// side gives it a SIGPIPE-style EOF on next write so cmd.Wait() can
-	// return instead of deadlocking. The same close is harmless on the
-	// success path because the reader has already drained to EOF.
+	// Close before wait so mid-tar failures unblock the subprocess.
 	_ = stream.Close()
 	waitErr := wait()
 	if readErr != nil {
@@ -128,8 +101,6 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 	}, nil
 }
 
-// readAndUploadEntries walks the cocoon export tar, parsing snapshot.json
-// into cfg and uploading every other entry as a blob descriptor.
 func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Reader, progress func(string)) (*snapshotExportConfig, map[string]manifest.SnapshotFile, []manifest.Descriptor, error) {
 	tr := tar.NewReader(r)
 	var (
@@ -156,12 +127,6 @@ func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Rea
 			continue
 		}
 
-		// Only regular files become OCI blob layers. cocoon snapshot
-		// export shouldn't emit directories or symlinks today, but
-		// guard against future changes that would otherwise produce
-		// zero-byte phantom layers in the manifest. tar.TypeReg covers
-		// both modern (TypeReg) and legacy GNU/POSIX-1988 (formerly
-		// TypeRegA) regular file flags since Go 1.11 normalized them.
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -183,9 +148,6 @@ func (p *Pusher) readAndUploadEntries(ctx context.Context, name string, r io.Rea
 	return cfg, files, layers, nil
 }
 
-// uploadTarEntry spools a single tar entry to a temp file while hashing,
-// then uploads it via the registry's blob endpoint with dedup. The returned
-// descriptor is what goes into the OCI manifest's `layers` array.
 func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Header, body io.Reader) (manifest.Descriptor, manifest.SnapshotFile, error) {
 	tmp, err := os.CreateTemp("", "epoch-snapshot-*")
 	if err != nil {
@@ -241,9 +203,6 @@ func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Heade
 	}, fileMeta, nil
 }
 
-// uploadSnapshotConfig builds the snapshot config blob from the cocoon
-// envelope and uploads it. Returns a descriptor suitable for the manifest's
-// `config` field.
 func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *snapshotExportConfig, files map[string]manifest.SnapshotFile) (manifest.Descriptor, error) {
 	cfgBlob := manifest.SnapshotConfig{
 		SchemaVersion: "v1",
@@ -283,9 +242,6 @@ func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *sna
 	}, nil
 }
 
-// buildSnapshotManifest assembles the final OCI manifest JSON for a snapshot
-// push. It populates the optional cocoonstack.snapshot.* annotations from
-// opts and the snapshot config.
 func buildSnapshotManifest(config manifest.Descriptor, layers []manifest.Descriptor, opts PushOptions) ([]byte, error) {
 	annotations := map[string]string{
 		manifest.AnnotationCreated: nowFunc().UTC().Format(time.RFC3339),

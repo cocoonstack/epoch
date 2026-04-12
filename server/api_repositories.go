@@ -11,7 +11,6 @@ import (
 	"github.com/cocoonstack/epoch/snapshot"
 )
 
-// GET /api/stats
 func (s *Server) apiStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.store.GetStats(r.Context())
 	if err != nil {
@@ -21,7 +20,6 @@ func (s *Server) apiStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// GET /api/repositories
 func (s *Server) apiListRepositories(w http.ResponseWriter, r *http.Request) {
 	repos, err := s.store.ListRepositories(r.Context())
 	if err != nil {
@@ -31,7 +29,6 @@ func (s *Server) apiListRepositories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, repos)
 }
 
-// GET /api/repositories/{name}
 func (s *Server) apiGetRepository(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	repo, err := s.store.GetRepository(r.Context(), name)
@@ -46,7 +43,6 @@ func (s *Server) apiGetRepository(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, repo)
 }
 
-// GET /api/repositories/{name}/tags
 func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tags, err := s.store.ListTags(r.Context(), name)
@@ -57,7 +53,6 @@ func (s *Server) apiListTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tags)
 }
 
-// GET /api/repositories/{name}/tags/{tag}
 func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
@@ -73,14 +68,7 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For snapshots, fetch the (tiny) config blob and inline its decoded
-	// fields so the UI can render the SnapshotID / Source Image / vCPU /
-	// memory / disk cards without a second round-trip. Failures are logged
-	// and skipped — the rest of the tag detail still renders.
-	//
-	// The fetch reuses snapshot.FetchSnapshotConfig via the same
-	// registryDownloader adapter that streamSnapshot uses, so the parse +
-	// stream + decode logic lives in exactly one place.
+	// Inline snapshot config for the UI.
 	var snapshotConfig *manifest.SnapshotConfig
 	if t.Kind == manifest.KindSnapshot.String() {
 		cfg, fetchErr := s.loadSnapshotConfig(r.Context(), name, t.ManifestJSON)
@@ -94,10 +82,6 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tagResponse(t, snapshotConfig))
 }
 
-// loadSnapshotConfig parses the cached manifest JSON to find the snapshot
-// config descriptor and delegates the blob fetch + decode to
-// [snapshot.FetchSnapshotConfig], reusing the same registryDownloader adapter
-// that the /dl/{name} streaming path uses.
 func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON string) (*manifest.SnapshotConfig, error) {
 	m, err := manifest.Parse([]byte(manifestJSON))
 	if err != nil {
@@ -107,23 +91,19 @@ func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON stri
 	return snapshot.FetchSnapshotConfig(ctx, dl, name, m.Config)
 }
 
-// DELETE /api/repositories/{name}/tags/{tag}
 func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
 
-	// Delete from object storage (source of truth).
 	if err := s.reg.DeleteManifest(r.Context(), name, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Delete from MySQL (best-effort; object storage is source of truth).
 	_ = s.store.DeleteTag(r.Context(), name, tag)
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// POST /api/catalog/sync
 func (s *Server) apiSync(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SyncFromCatalog(r.Context(), s.reg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

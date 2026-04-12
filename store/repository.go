@@ -5,19 +5,7 @@ import (
 	"database/sql"
 )
 
-// repoSummarySelect aggregates a repository's tag count, deduped blob size,
-// and the artifact_type + kind of its most recently pushed tag in one query.
-//
-// The dedup matters because two tags pointing at the same manifest digest
-// share the same set of blobs in object storage. Naively summing
-// tags.total_size double-counts every byte the second tag references; the
-// inner GROUP BY collapses tags by digest first, then sums.
-//
-// The latest-tag pick orders by pushed_at (the manifest's
-// org.opencontainers.image.created annotation, or upsert time as fallback)
-// rather than MAX(id) because tags are upserted in place (ON DUPLICATE KEY
-// UPDATE), so a re-pushed tag keeps its original id. id breaks ties when
-// two tags share a pushed_at timestamp.
+// repoSummarySelect aggregates tag count, deduped blob size, and the latest tag's artifact_type/kind.
 const repoSummarySelect = `
 SELECT r.id, r.name, r.created_at, r.updated_at,
        COALESCE(tc.cnt, 0)              AS tag_count,
@@ -43,8 +31,6 @@ LEFT JOIN (
     ) ranked WHERE rn = 1
 ) lt ON lt.repository_id = r.id`
 
-// --- Repository queries ---
-
 func (s *Store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	return queryRows(ctx, s.db, repoSummarySelect+`
 		ORDER BY r.updated_at DESC`, func(rows *sql.Rows, repo *Repository) error {
@@ -58,8 +44,6 @@ func (s *Store) GetRepository(ctx context.Context, name string) (*Repository, er
 			WHERE r.name = ?`, name))
 	})
 }
-
-// --- Tag queries ---
 
 func (s *Store) ListTags(ctx context.Context, repoName string) ([]Tag, error) {
 	return queryRows(ctx, s.db, `
@@ -93,16 +77,12 @@ func (s *Store) DeleteTag(ctx context.Context, repoName, tagName string) error {
 	return err
 }
 
-// --- Dashboard ---
-
 func (s *Store) GetStats(ctx context.Context) (*DashboardStats, error) {
 	var st DashboardStats
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM repositories`).Scan(&st.RepositoryCount)
 	if err != nil {
 		return nil, err
 	}
-	// Tag count is the raw row count; total size dedups blobs by digest so
-	// two tags pointing at the same manifest do not double-count storage.
 	err = s.db.QueryRowContext(ctx, `
 		SELECT (SELECT COUNT(*) FROM tags),
 		       COALESCE((SELECT SUM(blob_size) FROM (

@@ -14,9 +14,6 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// tokenExchangeBodyLimit caps the body of an OAuth token / userinfo response.
-// Real responses are a few KB; the cap is here so a hostile or broken IdP
-// cannot stream unbounded bytes.
 const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
 
 func (s *Server) setupAuthRoutes() {
@@ -43,10 +40,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"scope":         {utils.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
 		"state":         {state},
 	}
-	// Google's OAuth `hd` parameter takes a single domain. When the operator
-	// configures multiple allowed domains, omit the hint entirely and rely on
-	// the post-callback domain check to enforce membership; sending a joined
-	// list would silently reject everyone.
 	if s.sso.Provider == providerGoogle && len(s.sso.HostedDomains) == 1 {
 		params.Set("hd", s.sso.HostedDomains[0])
 	}
@@ -59,16 +52,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The state cookie is one-shot: handleLogin sets it, the success path
-	// below clears it, then the browser navigates to "/". If the user
-	// re-fires this GET — by hitting the browser back button, by Google
-	// replaying the redirect on a re-confirmation, or by reloading the
-	// callback URL — the cookie will already be gone and the strict state
-	// check below would surface "invalid state" to a user who is in fact
-	// still authenticated. Detect that replay shape (no state cookie BUT
-	// an unexpired session exists) and bounce them home instead. A genuine
-	// CSRF or unauthenticated stray callback still has no session, so it
-	// keeps falling through to the original 403.
 	stateCookie, stateCookieErr := r.Cookie("sso_state")
 	if stateCookieErr != nil || stateCookie.Value == "" {
 		if sess := s.getSession(r); sess != nil {
@@ -82,7 +65,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid state", http.StatusForbidden)
 		return
 	}
-	// Clear state cookie
 	http.SetCookie(w, &http.Cookie{Name: "sso_state", Path: "/", MaxAge: -1})
 
 	code := r.URL.Query().Get("code")
@@ -94,8 +76,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	logger := log.WithFunc("server.handleCallback")
 	ctx := r.Context()
 
-	// Exchange code for token. Use NewRequestWithContext so the request
-	// inherits the inbound request's deadline / cancellation.
 	tokenForm := url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {s.sso.ClientID},
@@ -138,7 +118,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user info
 	userReq, err := http.NewRequestWithContext(ctx, http.MethodGet, s.sso.UserInfoURL, nil)
 	if err != nil {
 		logger.Error(ctx, err, "build userinfo request")
@@ -177,7 +156,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set session cookie
 	sess := session{User: user.Name, Email: user.Email, Exp: time.Now().Unix() + cookieMaxAge}
 	signed := signSession(sess, s.sso.CookieSecret)
 	http.SetCookie(w, &http.Cookie{
@@ -197,9 +175,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// userMatchesHostedDomain returns true if the OAuth-reported hosted domain or
-// the email's domain part is in the configured allow-list. Comparisons are
-// case-insensitive; allowed entries are assumed to already be normalized.
 func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
 	hd := strings.ToLower(userHD)
 	emailLower := strings.ToLower(email)

@@ -1,20 +1,4 @@
-// Package manifest defines the OCI manifest types and cocoonstack
-// artifact-classification helpers used by epoch.
-//
-// Epoch stores three kinds of artifacts in the same OCI registry:
-//
-//   - Container images — standard OCI / Docker images. Epoch is a transparent
-//     mirror; no cocoonstack-specific shape.
-//   - Cloud images — disk-only OCI artifacts published via `oras push`, with
-//     artifactType [ArtifactTypeOSImage]. The windows builder is the canonical
-//     producer (split qcow2 parts).
-//   - VM snapshots — full cocoon VM state captured by `cocoon vm save` and
-//     uploaded by `epoch push` as an OCI artifact with artifactType
-//     [ArtifactTypeSnapshot].
-//
-// All three are stored as OCI 1.1 image manifests. The classification function
-// [Classify] looks at top-level artifactType first, then falls back to the
-// config blob mediaType for plain container images.
+// Package manifest defines OCI manifest types and artifact classification.
 package manifest
 
 import (
@@ -23,9 +7,6 @@ import (
 	"time"
 )
 
-// Kind classifies an OCI manifest by what it stores. The zero value is
-// KindUnknown, which means the bytes parsed as JSON but no recognized
-// discriminator was present.
 type Kind int
 
 const (
@@ -33,15 +14,9 @@ const (
 	KindContainerImage
 	KindCloudImage
 	KindSnapshot
-	// KindImageIndex is an OCI image index or Docker manifest list — a
-	// multi-arch envelope that references one image manifest per platform
-	// (e.g. ghcr.io/cocoonstack/cocoon/ubuntu:24.04). The index itself has
-	// no layers; epoch's sync layer walks the children to compute aggregate
-	// size and surface a per-platform breakdown in the UI.
 	KindImageIndex
 )
 
-// String returns a short human-readable name for the kind.
 func (k Kind) String() string {
 	switch k {
 	case KindContainerImage:
@@ -57,8 +32,6 @@ func (k Kind) String() string {
 	}
 }
 
-// Descriptor is the OCI Content Descriptor used by manifests to reference
-// blobs (config or layers). Only the fields epoch needs are present.
 type Descriptor struct {
 	MediaType    string            `json:"mediaType"`
 	Digest       string            `json:"digest"`
@@ -67,9 +40,6 @@ type Descriptor struct {
 	ArtifactType string            `json:"artifactType,omitempty"`
 }
 
-// Title returns the layer's `org.opencontainers.image.title` annotation, or
-// the empty string. Used to recover filenames for snapshot tar reassembly and
-// to order cloudimg split parts.
 func (d Descriptor) Title() string {
 	if d.Annotations == nil {
 		return ""
@@ -77,11 +47,7 @@ func (d Descriptor) Title() string {
 	return d.Annotations[AnnotationTitle]
 }
 
-// OCIManifest is a parsed OCI 1.1 image manifest OR an OCI image index.
-// The two share enough structure that we use one type for both: image
-// manifests populate Config + Layers; image indexes populate Manifests
-// (the per-platform child descriptors). Mutually exclusive in practice —
-// callers branch on [ClassifyParsed] to know which fields to read.
+// OCIManifest represents both OCI image manifests and image indexes.
 type OCIManifest struct {
 	SchemaVersion int               `json:"schemaVersion"`
 	MediaType     string            `json:"mediaType,omitempty"`
@@ -93,10 +59,6 @@ type OCIManifest struct {
 	Annotations   map[string]string `json:"annotations,omitempty"`
 }
 
-// IndexManifest is a single entry in an OCI image index's `manifests[]`
-// array — a content-addressed pointer to a per-platform image manifest plus
-// the platform metadata that lets clients (and the epoch UI) know which
-// architecture/OS each child targets.
 type IndexManifest struct {
 	MediaType string    `json:"mediaType"`
 	Digest    string    `json:"digest"`
@@ -104,9 +66,6 @@ type IndexManifest struct {
 	Platform  *Platform `json:"platform,omitempty"`
 }
 
-// Platform describes the OS / architecture target of an image manifest
-// inside an OCI image index. Variant is populated for arches that have
-// sub-flavors (e.g. arm/v7, arm/v8).
 type Platform struct {
 	Architecture string `json:"architecture,omitempty"`
 	OS           string `json:"os,omitempty"`
@@ -114,8 +73,6 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
-// Parse decodes raw manifest bytes into an [OCIManifest]. Wraps the JSON
-// error with a stable prefix so callers can match cleanly.
 func Parse(raw []byte) (*OCIManifest, error) {
 	var m OCIManifest
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -124,17 +81,7 @@ func Parse(raw []byte) (*OCIManifest, error) {
 	return &m, nil
 }
 
-// Classify returns the artifact kind by inspecting the manifest in the
-// following order of authority:
-//
-//  1. Top-level `artifactType` (OCI 1.1) for cocoonstack-specific values.
-//  2. `config.mediaType` for plain OCI / Docker container image manifests.
-//  3. Top-level `mediaType` for OCI image indexes / Docker manifest lists,
-//     classified as KindImageIndex so the UI and sync layer can render the
-//     per-platform breakdown instead of treating them as a single image.
-//
-// The function does not validate the manifest against the OCI spec —
-// malformed JSON returns KindUnknown plus the parse error.
+// Classify returns the artifact kind from raw manifest JSON.
 func Classify(raw []byte) (Kind, error) {
 	var probe struct {
 		MediaType    string `json:"mediaType,omitempty"`
@@ -149,9 +96,7 @@ func Classify(raw []byte) (Kind, error) {
 	return classifyFields(probe.ArtifactType, probe.Config.MediaType, probe.MediaType), nil
 }
 
-// ClassifyParsed returns the artifact kind of an already-parsed manifest.
-// Callers that have already called [Parse] use this to avoid a second JSON
-// unmarshal of the same bytes. The ordering of authority matches [Classify].
+// ClassifyParsed classifies an already-parsed manifest.
 func ClassifyParsed(m *OCIManifest) Kind {
 	return classifyFields(m.ArtifactType, m.Config.MediaType, m.MediaType)
 }
@@ -177,20 +122,13 @@ func classifyFields(artifactType, configMediaType, topMediaType string) Kind {
 	return KindUnknown
 }
 
-// SnapshotConfig is the JSON shape of the config blob referenced by a snapshot
-// OCI manifest's `config` descriptor. Wire mediaType: [MediaTypeSnapshotConfig].
-//
-// The config blob captures the cocoon VM metadata that is too structured for
-// annotations (numeric resource values, base image hex IDs, sparse-file
-// metadata). It is written as a single content-addressable blob and referenced
-// from the manifest like any other OCI config.
 type SnapshotFile struct {
 	Mode       int64  `json:"mode,omitempty"`
 	SparseMap  string `json:"sparseMap,omitempty"`
 	SparseSize int64  `json:"sparseSize,omitempty"`
 }
 
-// SnapshotConfig is the per-snapshot metadata stored in the OCI config blob.
+// SnapshotConfig is the OCI config blob for snapshot manifests.
 type SnapshotConfig struct {
 	SchemaVersion string                  `json:"schemaVersion"`
 	SnapshotID    string                  `json:"snapshotId"`
@@ -208,16 +146,11 @@ type SnapshotConfig struct {
 	CreatedAt     time.Time               `json:"createdAt"`
 }
 
-// Catalog is epoch's global index of repositories under `epoch/catalog.json`.
-// It is internal to epoch's storage layer; OCI clients use `/v2/_catalog`
-// instead.
 type Catalog struct {
 	Repositories map[string]*Repository `json:"repositories"`
 	UpdatedAt    time.Time              `json:"updatedAt"`
 }
 
-// Repository tracks the tags currently in use for a single repository name.
-// Tag values point at the manifest's storage key under `epoch/manifests/...`.
 type Repository struct {
 	Tags      map[string]string `json:"tags"`
 	UpdatedAt time.Time         `json:"updatedAt"`

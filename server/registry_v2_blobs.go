@@ -8,7 +8,6 @@ import (
 	"github.com/cocoonstack/epoch/manifest"
 )
 
-// GET /v2/{name}/blobs/{digest}
 func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 
@@ -32,7 +31,6 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, body)
 }
 
-// HEAD /v2/{name}/blobs/{digest}
 func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 
@@ -52,7 +50,6 @@ func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// PUT /v2/{name}/blobs/sha256:{digest}
 func (s *Server) v2PutBlob(w http.ResponseWriter, r *http.Request) {
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 	if dgst == "" {

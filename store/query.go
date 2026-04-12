@@ -10,9 +10,7 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// queryRows runs a query and scans every row via scan, returning a non-nil
-// slice even when the result set is empty so JSON encoders render `[]`
-// instead of `null`.
+// queryRows returns a non-nil slice even when empty (JSON renders `[]` not `null`).
 func queryRows[T any](ctx context.Context, db *sql.DB, query string, scan func(*sql.Rows, *T) error, args ...any) ([]T, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

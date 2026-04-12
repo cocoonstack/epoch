@@ -5,7 +5,6 @@ import (
 	"net/http"
 )
 
-// GET /api/tokens
 func (s *Server) apiListTokens(w http.ResponseWriter, r *http.Request) {
 	tokens, err := s.store.ListTokens(r.Context())
 	if err != nil {
@@ -15,7 +14,6 @@ func (s *Server) apiListTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokens)
 }
 
-// POST /api/tokens — body: {"name":"my-token"}
 func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
@@ -38,7 +36,6 @@ func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"token": plaintext, "name": req.Name})
 }
 
-// DELETE /api/tokens/{id}
 func (s *Server) apiDeleteToken(w http.ResponseWriter, r *http.Request) {
 	id, err := parsePositivePathID(r, "id")
 	if err != nil {

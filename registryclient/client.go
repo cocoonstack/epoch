@@ -1,6 +1,4 @@
-// Package registryclient is a small HTTP client for talking to an Epoch
-// (or any OCI Distribution-compatible) registry. It implements just enough
-// of the spec for epoch's CLI tools to push and pull blobs and manifests.
+// Package registryclient is a small HTTP client for OCI Distribution registries.
 package registryclient
 
 import (
@@ -16,43 +14,26 @@ import (
 	"time"
 )
 
-// ErrManifestNotFound is returned by GetManifest when the registry
-// responds with 404 for the requested (name, tag). Callers that want
-// to distinguish "not yet pushed" from real transport / server
-// failures should use errors.Is(err, ErrManifestNotFound) instead of
-// treating every error as absence.
-//
-// Introduced so cocoon-operator can stop swallowing epoch transport
-// errors as "hibernation snapshot not ready yet" — see the
-// SnapshotRegistry adapter in cocoon-operator/epoch.
+// ErrManifestNotFound distinguishes 404 from transport errors.
 var ErrManifestNotFound = errors.New("registryclient: manifest not found")
 
 const (
 	defaultBaseURL    = "http://127.0.0.1:8080"
 	maxErrorBodyBytes = 512
 
-	// manifestAcceptHeader lists every manifest media type the client knows
-	// how to handle. Sent on every GET /v2/.../manifests/... request — Docker
-	// Hub / GHCR will return 415 or a different schema if it is missing.
 	manifestAcceptHeader = "application/vnd.oci.image.manifest.v1+json, " +
 		"application/vnd.oci.image.index.v1+json, " +
 		"application/vnd.docker.distribution.manifest.v2+json, " +
 		"application/vnd.docker.distribution.manifest.list.v2+json"
 )
 
-// Client wraps the OCI Distribution endpoints epoch CLIs use.
-//
-// All methods take a repository `name` so multi-segment names like
-// `library/nginx` work; the client never tries to interpret it.
 type Client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
 }
 
-// New creates a client for the given base URL and bearer token. Empty baseURL
-// falls back to http://127.0.0.1:8080. The TLS config skips verification
-// because epoch is commonly deployed behind a self-signed cert in dev.
+// New creates a client. Empty baseURL defaults to http://127.0.0.1:8080.
 func New(baseURL, token string) *Client {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
@@ -73,21 +54,11 @@ func New(baseURL, token string) *Client {
 	}
 }
 
-// BaseURL returns the configured base URL.
 func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-// --- Manifests ---
-
-// GetManifest downloads a manifest's raw bytes for `name:tag` and returns
-// them along with the server-supplied Content-Type. Callers that need to
-// classify the manifest pass the bytes to manifest.Classify.
-//
-// A 404 response returns ErrManifestNotFound so callers can distinguish
-// "the tag has not been pushed yet" from real transport or server
-// failures with errors.Is. Every other non-200 status flows through
-// statusError as a descriptive error.
+// GetManifest downloads a manifest. Returns ErrManifestNotFound on 404.
 func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, string, error) {
 	rawURL := c.v2URL(name, "manifests", tag)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -118,17 +89,10 @@ func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, str
 	return data, resp.Header.Get("Content-Type"), nil
 }
 
-// PutManifest uploads a manifest with the given content type. The OCI spec
-// requires the Content-Type header to match the manifest's `mediaType` field;
-// callers MUST pass the right value (typically MediaTypeOCIManifest).
 func (c *Client) PutManifest(ctx context.Context, name, tag string, data []byte, contentType string) error {
 	return c.putBytes(ctx, c.v2URL(name, "manifests", tag), contentType, bytes.NewReader(data), int64(len(data)), http.StatusCreated)
 }
 
-// --- Blobs ---
-
-// BlobExists returns true if the blob is present in the repository's blob
-// store. The digest must include the `sha256:` prefix.
 func (c *Client) BlobExists(ctx context.Context, name, digest string) (bool, error) {
 	rawURL := c.v2URL(name, "blobs", digest)
 	resp, err := c.do(ctx, http.MethodHead, rawURL, nil, "", -1)
@@ -146,8 +110,7 @@ func (c *Client) BlobExists(ctx context.Context, name, digest string) (bool, err
 	}
 }
 
-// GetBlob downloads a blob and returns the body for the caller to consume.
-// The digest must include the `sha256:` prefix. Caller must close the body.
+// GetBlob downloads a blob. Caller must close the body.
 func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadCloser, error) {
 	rawURL := c.v2URL(name, "blobs", digest)
 	resp, err := c.do(ctx, http.MethodGet, rawURL, nil, "", -1)
@@ -161,16 +124,10 @@ func (c *Client) GetBlob(ctx context.Context, name, digest string) (io.ReadClose
 	return resp.Body, nil
 }
 
-// PutBlob uploads a blob via epoch's monolithic single-PUT shortcut at
-// `PUT /v2/<name>/blobs/<digest>`. The digest must include the `sha256:`
-// prefix.
 func (c *Client) PutBlob(ctx context.Context, name, digest string, body io.Reader, size int64) error {
 	return c.putBytes(ctx, c.v2URL(name, "blobs", digest), "application/octet-stream", body, size, http.StatusCreated)
 }
 
-// --- Catalog / tag listing ---
-
-// Catalog calls `GET /v2/_catalog` and returns the repository list.
 func (c *Client) Catalog(ctx context.Context) ([]string, error) {
 	var resp struct {
 		Repositories []string `json:"repositories"`
@@ -181,7 +138,6 @@ func (c *Client) Catalog(ctx context.Context) ([]string, error) {
 	return resp.Repositories, nil
 }
 
-// ListTags calls `GET /v2/<name>/tags/list` and returns the tag list.
 func (c *Client) ListTags(ctx context.Context, name string) ([]string, error) {
 	var resp struct {
 		Tags []string `json:"tags"`
@@ -192,7 +148,6 @@ func (c *Client) ListTags(ctx context.Context, name string) ([]string, error) {
 	return resp.Tags, nil
 }
 
-// DeleteManifest calls `DELETE /v2/<name>/manifests/<reference>`.
 func (c *Client) DeleteManifest(ctx context.Context, name, reference string) error {
 	rawURL := c.v2URL(name, "manifests", reference)
 	resp, err := c.do(ctx, http.MethodDelete, rawURL, nil, "", -1)
@@ -217,8 +172,6 @@ func (c *Client) getJSON(ctx context.Context, rawURL string, out any) error {
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
-
-// --- HTTP plumbing ---
 
 func (c *Client) v2URL(name, kind, ref string) string {
 	return fmt.Sprintf("%s/v2/%s/%s/%s", c.baseURL, name, kind, ref)

@@ -12,7 +12,6 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// Config holds S3-compatible object store settings.
 type Config struct {
 	Endpoint  string
 	AccessKey string //nolint:gosec // configuration schema field name
@@ -23,8 +22,7 @@ type Config struct {
 	Secure    bool
 }
 
-// ConfigFromEnv reads S3-compatible storage settings from the environment.
-// It optionally falls back to ~/.config/epoch/s3.env when values are missing.
+// ConfigFromEnv reads S3 settings from environment, falling back to ~/.config/epoch/s3.env.
 func ConfigFromEnv(prefix string) (*Config, error) {
 	envFile := utils.FirstNonEmpty(os.Getenv("EPOCH_S3_ENV_FILE"), filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
 
@@ -90,9 +88,6 @@ func normalizeEndpoint(raw, secureRaw string) (string, bool, error) {
 	return host, secure, nil
 }
 
-// splitEndpointHost extracts the host portion of an s3 endpoint and reports
-// whether the URL scheme implies a secure connection. A bare "host:port"
-// input defaults to secure=true; the caller can override with secureRaw.
 func splitEndpointHost(raw string) (host string, defaultSecure bool, err error) {
 	if !strings.Contains(raw, "://") {
 		return raw, true, nil
@@ -107,8 +102,6 @@ func splitEndpointHost(raw string) (host string, defaultSecure bool, err error) 
 	return u.Host, u.Scheme == "https", nil
 }
 
-// resolveSecure honors an explicit EPOCH_S3_SECURE override, falling back to
-// the scheme-derived default when the override is empty.
 func resolveSecure(secureRaw string, defaultSecure bool) (bool, error) {
 	if secureRaw == "" {
 		return defaultSecure, nil

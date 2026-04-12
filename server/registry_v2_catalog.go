@@ -7,23 +7,6 @@ import (
 	"slices"
 )
 
-// GET /v2/
-//
-// The Distribution Spec uses this endpoint as the registry-discovery probe
-// (clients call it `Ping`). For registries that require authentication, the
-// spec says it should return 401 with a Bearer challenge so the client knows
-// where to fetch a token from. go-containerregistry, crane, docker, and
-// containerd cache that challenge for the lifetime of the connection and
-// reuse it on every subsequent request — including pushes.
-//
-// Returning 200 when auth is configured is what most clients interpret as
-// "anonymous registry, no challenge needed", and they then never bother
-// running the bearer flow on a later 401. So we serve 401-with-challenge
-// when no valid credential was presented and 200 once the client authenticates.
-//
-// Other GET /v2/* paths (manifests, blobs, tags/list, _catalog) remain
-// publicly readable per the cocoon design — only this discovery endpoint
-// gates on credentials.
 func (s *Server) v2Check(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Distribution-API-Version", "registry/2.0")
 	if s.v2WritesRequireAuth() && !s.validateBearer(r) {
@@ -34,7 +17,6 @@ func (s *Server) v2Check(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
-// GET /v2/_catalog
 func (s *Server) v2Catalog(w http.ResponseWriter, r *http.Request) {
 	cat, err := s.reg.GetCatalog(r.Context())
 	if err != nil {
@@ -44,12 +26,10 @@ func (s *Server) v2Catalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"repositories": slices.Sorted(maps.Keys(cat.Repositories))})
 }
 
-// GET /v2/{name}/tags/list
 func (s *Server) v2TagsList(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tags, err := s.reg.ListTags(r.Context(), name)
 	if err != nil {
-		// Fallback: read tags from catalog.
 		cat, catErr := s.reg.GetCatalog(r.Context())
 		if catErr != nil {
 			v2Error(w, http.StatusNotFound, "NAME_UNKNOWN", fmt.Sprintf("repository %q not found", name))

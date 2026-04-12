@@ -1,15 +1,5 @@
-// Package server implements the Epoch HTTP server.
-//
-// It serves two APIs:
-//   - /v2/ — OCI Distribution-shaped push/pull protocol (manifests + blob streaming via object storage)
-//   - /api/ — Control plane API backed by MySQL
-//
-// Static frontend files are embedded and served at /.
-//
-// Routing uses gorilla/mux because Go 1.22+ stdlib net/http.ServeMux's
-// pattern-conflict checks reject the combination of exact-match GET routes
-// (`GET /v2/_catalog`) and method-specific wildcards (`HEAD /v2/{path...}`)
-// that the OCI Distribution shape needs.
+// Package server implements the Epoch HTTP server. Uses gorilla/mux because
+// stdlib ServeMux rejects OCI Distribution route patterns.
 package server
 
 import (
@@ -30,12 +20,8 @@ import (
 	"github.com/cocoonstack/epoch/ui"
 )
 
-// defaultUploadSpoolDir is where in-progress chunked OCI uploads are spooled
-// when EPOCH_UPLOAD_DIR is not set. It must be backed by real disk — see
-// resolveUploadDir for the rationale.
 const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
 
-// Server is the Epoch HTTP server.
 type Server struct {
 	reg           *registry.Registry
 	store         *store.Store
@@ -47,7 +33,6 @@ type Server struct {
 	uiHandler     http.Handler
 }
 
-// New creates a new server.
 func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr string) *Server {
 	logger := log.WithFunc("server.New")
 	sso := LoadSSOConfig(ctx)
@@ -73,17 +58,6 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	return s
 }
 
-// resolveUploadDir picks the directory used to spool in-progress chunked OCI
-// uploads. Order of preference:
-//
-//  1. $EPOCH_UPLOAD_DIR if set and creatable.
-//  2. defaultUploadSpoolDir (/var/cache/epoch/uploads) if creatable.
-//  3. os.TempDir() with a loud warning — operators should fix the deploy.
-//
-// The directory MUST be backed by real disk. The default os.TempDir() on
-// systemd hosts is often a tmpfs that lives in RAM, which would defeat the
-// disk-backed upload session refactor and OOM the host on multi-GiB pushes.
-// We log the chosen directory so operators can sanity-check it at boot.
 func resolveUploadDir(ctx context.Context) string {
 	logger := log.WithFunc("server.resolveUploadDir")
 	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
@@ -103,11 +77,9 @@ func resolveUploadDir(ctx context.Context) string {
 	return fallback
 }
 
-// ListenAndServe starts the server with initial sync and background sync.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	logger := log.WithFunc("server.ListenAndServe")
 
-	// Initial catalog sync.
 	logger.Info(ctx, "syncing catalog to MySQL...")
 	if err := s.store.SyncFromCatalog(ctx, s.reg); err != nil {
 		logger.Warnf(ctx, "initial sync failed (continuing): %v", err)
@@ -115,7 +87,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		logger.Info(ctx, "initial sync complete")
 	}
 
-	// Background sync every 5 minutes.
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -142,44 +113,28 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) setupRoutes(ctx context.Context) {
-	// Registry V2 — OCI Distribution endpoints. gorilla/mux's regex segment
-	// patterns make multi-segment repository names like `library/nginx` work
-	// without a hand-rolled dispatcher: `{name:.+}` is greedy across slashes
-	// and the literal segments after it (`/manifests/`, `/blobs/`, `/tags/`)
-	// anchor the match. Routes are registered most-specific first.
 	v2 := s.router.PathPrefix("/v2").Subrouter()
 	v2.StrictSlash(true)
 
-	// OCI Distribution discovery + special endpoints (must come before the
-	// wildcards so the literal segment matches).
 	v2.HandleFunc("/", s.v2Check).Methods(http.MethodGet, http.MethodHead)
 	v2.HandleFunc("/_catalog", s.v2Catalog).Methods(http.MethodGet, http.MethodHead)
 	v2.HandleFunc("/token", s.v2Token).Methods(http.MethodGet, http.MethodPost)
 
-	// Manifests by tag or digest.
 	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2GetManifest).Methods(http.MethodGet)
 	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2HeadManifest).Methods(http.MethodHead)
 	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2PutManifest).Methods(http.MethodPut)
 	v2.HandleFunc("/{name:.+}/manifests/{reference}", s.v2DeleteManifest).Methods(http.MethodDelete)
 
-	// Tags list.
 	v2.HandleFunc("/{name:.+}/tags/list", s.v2TagsList).Methods(http.MethodGet)
 
-	// Blob uploads — POST init / PATCH chunks / PUT complete. The trailing
-	// slash on the init path is required by the OCI spec; clients that omit
-	// it will not match this route.
 	v2.HandleFunc("/{name:.+}/blobs/uploads/", s.v2InitBlobUpload).Methods(http.MethodPost)
 	v2.HandleFunc("/{name:.+}/blobs/uploads/{uuid}", s.v2PatchBlobUpload).Methods(http.MethodPatch)
 	v2.HandleFunc("/{name:.+}/blobs/uploads/{uuid}", s.v2CompleteBlobUpload).Methods(http.MethodPut)
 
-	// Blob get / head / put-by-digest. The {digest} segment includes the
-	// `sha256:` prefix because that is the OCI spec form; handlers strip it
-	// before keying into the object store.
 	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2GetBlob).Methods(http.MethodGet)
 	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2HeadBlob).Methods(http.MethodHead)
 	v2.HandleFunc("/{name:.+}/blobs/{digest}", s.v2PutBlob).Methods(http.MethodPut)
 
-	// Control plane API.
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.HandleFunc("/stats", s.apiStats).Methods(http.MethodGet)
 	api.HandleFunc("/repositories", s.apiListRepositories).Methods(http.MethodGet)
@@ -188,27 +143,18 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	api.HandleFunc("/tokens", s.apiCreateToken).Methods(http.MethodPost)
 	api.HandleFunc("/tokens/{id:[0-9]+}", s.apiDeleteToken).Methods(http.MethodDelete)
 
-	// Control plane API — repository routes (multi-segment names).
-	// Most-specific first.
 	api.HandleFunc("/repositories/{name:.+}/tags/{tag}", s.apiGetTag).Methods(http.MethodGet)
 	api.HandleFunc("/repositories/{name:.+}/tags/{tag}", s.apiDeleteTag).Methods(http.MethodDelete)
 	api.HandleFunc("/repositories/{name:.+}/tags", s.apiListTags).Methods(http.MethodGet)
 	api.HandleFunc("/repositories/{name:.+}", s.apiGetRepository).Methods(http.MethodGet)
 
-	// Public artifact download (auth-exempt). {name:.+} matches multi-segment
-	// repository names like windows/win11 so /dl/windows/win11 routes correctly.
 	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 
-	// SSO login / logout routes must be registered BEFORE the UI catchall
-	// below; gorilla/mux matches routes in registration order, so a route
-	// added after PathPrefix("/") would be shadowed and 404 via the file
-	// server.
+	// SSO routes must be registered before the UI catchall.
 	if s.sso != nil {
 		s.setupAuthRoutes()
 	}
 
-	// Frontend — embedded UI catches everything else under `/`. Must be
-	// registered last so specific routes win.
 	uiFS, err := fs.Sub(ui.FS, ".")
 	if err != nil {
 		log.WithFunc("server.setupRoutes").Fatalf(ctx, err, "embed ui filesystem: %v", err)
@@ -244,9 +190,6 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 		}
 		return err
 	case <-ctx.Done():
-		// Parent ctx is already canceled; deriving from it would yield an
-		// instantly-canceled ctx and skip the drain entirely. Use Background so
-		// srv.Shutdown gets its full 15s window to finish in-flight requests.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -259,11 +202,7 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 	}
 }
 
-// --- Middleware ---
-
 func (s *Server) withLogging(next http.Handler) http.Handler {
-	// Build the logger once at wire-up time so the per-request hot path does
-	// not allocate a new Fields struct on every call.
 	logger := log.WithFunc("server.withLogging")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -297,8 +236,6 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
 }
-
-// --- JSON helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	data, err := json.Marshal(v)

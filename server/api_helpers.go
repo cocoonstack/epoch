@@ -11,20 +11,6 @@ import (
 	"github.com/cocoonstack/epoch/store"
 )
 
-// tagResponse builds the tag detail payload by passing the manifest bytes
-// through as json.RawMessage — the manifest is already stored as valid JSON
-// in MySQL, so re-unmarshaling it into a map[string]any only to re-marshal
-// it on the way out wastes an allocation tree on every request (and grows
-// linearly with multi-arch image index size).
-//
-// snapshotConfig is the decoded contents of the snapshot config blob (the
-// 200-byte SnapshotConfig referenced by manifest.config.digest). It is only
-// inlined when non-nil — the caller decides whether to fetch it (currently
-// only the snapshot kind triggers a fetch).
-//
-// platformSizes is inlined only for image-index tags (the field is empty for
-// every other kind), so the UI can render real per-platform content sizes
-// without each GET refetching every child manifest.
 func tagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[string]any {
 	resp := map[string]any{
 		"repoName":     t.RepoName,

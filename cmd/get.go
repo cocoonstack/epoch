@@ -55,8 +55,6 @@ Examples:
 	}
 }
 
-// httpBlobReader binds a registryclient.Client to a single repo name so it
-// can satisfy cloudimg.BlobReader.
 type httpBlobReader struct {
 	client *registryclient.Client
 	name   string

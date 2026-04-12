@@ -17,7 +17,6 @@ const (
 	cookieMaxAge = 86400 // 24h
 )
 
-// session is the data stored in the signed cookie.
 type session struct {
 	User  string `json:"u"`
 	Email string `json:"e"`

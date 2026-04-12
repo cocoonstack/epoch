@@ -21,7 +21,6 @@ const (
 	providerOIDC   = "oidc"
 )
 
-// SSOConfig holds optional UI auth settings loaded from the environment.
 type SSOConfig struct {
 	Provider     string
 	ClientID     string
@@ -32,14 +31,10 @@ type SSOConfig struct {
 	UserInfoURL  string
 	LogoutURL    string
 	Scopes       string
-	// HostedDomains holds the allow-list of Google Workspace domains.
-	// Sourced from GOOGLE_OAUTH_HOSTED_DOMAIN as a comma-separated list
-	HostedDomains []string
+	HostedDomains []string // allow-list of Google Workspace domains
 	CookieSecret  []byte
 }
 
-// parseHostedDomains splits a comma-separated GOOGLE_OAUTH_HOSTED_DOMAIN value
-// into a normalized slice (lowercased, trimmed, empty entries dropped).
 func parseHostedDomains(raw string) []string {
 	if raw == "" {
 		return nil
@@ -55,7 +50,6 @@ func parseHostedDomains(raw string) []string {
 	return out
 }
 
-// LoadSSOConfig reads optional UI auth configuration from the environment.
 func LoadSSOConfig(ctx context.Context) *SSOConfig {
 	logger := log.WithFunc("server.LoadSSOConfig")
 	provider := strings.ToLower(utils.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))

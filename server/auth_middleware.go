@@ -6,14 +6,6 @@ import (
 	"strings"
 )
 
-// publicExactPaths lists paths that bypass auth entirely when matched
-// exactly. The OCI Distribution token endpoint is included because it does
-// its own basic-auth check internally; the SSO login/logout endpoints are
-// public so the redirect-to-/login flow terminates.
-//
-// Exact matching is deliberate: a loose prefix match (e.g. `/login` as a
-// prefix) would leak any future route whose name accidentally starts with
-// one of these strings (think `/v2/tokens`).
 var publicExactPaths = map[string]bool{
 	"/healthz":        true,
 	"/login":          true,
@@ -22,12 +14,8 @@ var publicExactPaths = map[string]bool{
 	"/v2/token":       true,
 }
 
-// publicPathPrefixes lists path prefixes that bypass auth. Only the public
-// artifact download path is a prefix match because cloud image names are
-// multi-segment (e.g. `/dl/windows/win11`).
 var publicPathPrefixes = []string{"/dl/"}
 
-// isPublicPath returns true for paths that bypass authentication entirely.
 func isPublicPath(path string) bool {
 	if publicExactPaths[path] {
 		return true
@@ -37,10 +25,6 @@ func isPublicPath(path string) bool {
 	})
 }
 
-// isV2WriteMethod returns true for HTTP methods that mutate /v2/ state.
-// GET and HEAD are reads — by policy they are public on /v2/ so OCI clients
-// can pull without credentials. PUT/POST/PATCH/DELETE still require a Bearer
-// token.
 func isV2WriteMethod(method string) bool {
 	switch method {
 	case http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete:
@@ -49,12 +33,6 @@ func isV2WriteMethod(method string) bool {
 	return false
 }
 
-// withAuth protects routes that require authentication.
-//
-// Policy:
-//   - Public paths (healthz, login, logout, /dl/) bypass auth.
-//   - /v2/ reads (GET/HEAD) are public; writes require a Bearer token.
-//   - Everything else (UI, /api/, /auth/) accepts a Bearer token OR an SSO session.
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -73,8 +51,6 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-// serveV2 handles auth for the /v2/ subtree. Reads pass through; writes go
-// through the Bearer token check.
 func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	if !isV2WriteMethod(r.Method) {
 		next.ServeHTTP(w, r)
@@ -92,8 +68,6 @@ func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handl
 	v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Bearer token required")
 }
 
-// serveUIOrAPI handles auth for non-v2 paths. Accepts a Bearer token first
-// (machine clients hitting /api/) and falls back to SSO sessions for browsers.
 func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	if s.validateBearer(r) {
 		next.ServeHTTP(w, r)
@@ -114,15 +88,10 @@ func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request, next http.
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-// v2WritesRequireAuth returns true if any token source is configured. With
-// no bootstrap token and no DB-managed token store, /v2/ writes are open
-// (matches the old behavior for unauthenticated dev setups).
 func (s *Server) v2WritesRequireAuth() bool {
 	return s.registryToken != "" || s.store != nil
 }
 
-// validateBearer extracts and validates a Bearer token from the request.
-// Returns false when no token was supplied or the token is unknown.
 func (s *Server) validateBearer(r *http.Request) bool {
 	auth := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(auth, "Bearer ")
