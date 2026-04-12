@@ -28,8 +28,8 @@ type PushOptions struct {
 	Tag       string
 	BaseImage string // optional cocoonstack.snapshot.baseimage annotation
 	Source    string
-	Revision string
-	Progress func(string)
+	Revision  string
+	Progress  func(string)
 }
 
 type PushResult struct {
