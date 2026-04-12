@@ -148,6 +148,7 @@ func (c *Client) ListTags(ctx context.Context, name string) ([]string, error) {
 	return resp.Tags, nil
 }
 
+// DeleteManifest removes a manifest. A 404 (already absent) is treated as success.
 func (c *Client) DeleteManifest(ctx context.Context, name, reference string) error {
 	rawURL := c.v2URL(name, "manifests", reference)
 	resp, err := c.do(ctx, http.MethodDelete, rawURL, nil, "", -1)
@@ -155,6 +156,9 @@ func (c *Client) DeleteManifest(ctx context.Context, name, reference string) err
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return c.statusError(http.MethodDelete, rawURL, resp)
 	}

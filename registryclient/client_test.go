@@ -162,6 +162,19 @@ func TestGetManifestNotFoundReturnsSentinel(t *testing.T) {
 	}
 }
 
+func TestDeleteManifestNotFoundIsSuccess(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	if err := c.DeleteManifest(t.Context(), "demo", "gone"); err != nil {
+		t.Errorf("DeleteManifest on 404 should succeed, got %v", err)
+	}
+}
+
 func TestGetManifestServerErrorNotConfusedWithNotFound(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
