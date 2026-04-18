@@ -81,11 +81,11 @@ type Platform struct {
 
 // Parse unmarshals raw JSON into an OCIManifest.
 func Parse(raw []byte) (*OCIManifest, error) {
-	var m OCIManifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	m := &OCIManifest{}
+	if err := json.Unmarshal(raw, m); err != nil {
 		return nil, fmt.Errorf("parse oci manifest: %w", err)
 	}
-	return &m, nil
+	return m, nil
 }
 
 // Classify returns the artifact kind from raw manifest JSON.

@@ -30,12 +30,12 @@ func queryRows[T any](ctx context.Context, db *sql.DB, query string, scan func(*
 }
 
 func queryOptional[T any](scan func(*T) error) (*T, error) {
-	var item T
-	if err := scan(&item); err != nil {
+	item := new(T)
+	if err := scan(item); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return &item, nil
+	return item, nil
 }
