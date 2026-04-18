@@ -55,6 +55,18 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	// The /v2/ base endpoint is the OCI auth probe. When auth is
+	// configured, challenge unconditionally so that Docker/crane enter
+	// the full token exchange flow before attempting any writes.
+	if r.URL.Path == "/v2/" && s.v2WritesRequireAuth() {
+		if s.validateBearer(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
+		v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		return
+	}
 	if !isV2WriteMethod(r.Method) {
 		next.ServeHTTP(w, r)
 		return

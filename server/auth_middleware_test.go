@@ -215,6 +215,44 @@ func TestRegistryTokenCannotAccessAPI(t *testing.T) {
 	}
 }
 
+// TestWithAuthV2BaseEndpointChallenges asserts that GET /v2/ returns 401
+// with a WWW-Authenticate challenge when auth is configured, forcing
+// Docker/crane clients through the proper token exchange flow.
+func TestWithAuthV2BaseEndpointChallenges(t *testing.T) {
+	s := &Server{registryToken: "secret"}
+	h := s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not have been reached without a token on /v2/")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /v2/ status = %d, want 401", rec.Code)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got == "" {
+		t.Error("GET /v2/ missing WWW-Authenticate header")
+	}
+}
+
+// TestWithAuthV2BaseEndpointPassesWithToken asserts that GET /v2/ succeeds
+// when a valid Bearer token is provided.
+func TestWithAuthV2BaseEndpointPassesWithToken(t *testing.T) {
+	hit := false
+	s := &Server{registryToken: "secret"}
+	h := s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !hit {
+		t.Errorf("GET /v2/ with valid token was rejected: status %d", rec.Code)
+	}
+}
+
 // TestWithAuthDownloadIsPublic ensures /dl/ bypasses auth even when a
 // token is configured.
 func TestWithAuthDownloadIsPublic(t *testing.T) {
