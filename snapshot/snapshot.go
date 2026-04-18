@@ -74,6 +74,7 @@ func ResolveCocoonBinary(envValue string) (string, error) {
 
 // Export streams a snapshot out of cocoon via `cocoon snapshot export`.
 func (e *ExecCocoon) Export(ctx context.Context, name string) (io.ReadCloser, func() error, error) {
+	// cocoon CLI is the authoritative implementation for snapshot export; no Go library equivalent exists.
 	cmd := exec.CommandContext(ctx, e.Binary, "snapshot", "export", name, "-o", "-") //nolint:gosec // Binary was validated by ResolveCocoonBinary
 	cmd.Stderr = e.stderr()
 	stdout, err := cmd.StdoutPipe()
@@ -106,6 +107,7 @@ func (e *ExecCocoon) ImageImport(ctx context.Context, name string) (io.WriteClos
 }
 
 func (e *ExecCocoon) startWithStdinPipe(ctx context.Context, args []string, label string) (io.WriteCloser, func() error, error) {
+	// cocoon CLI is the authoritative implementation for snapshot/image import; no Go library equivalent exists.
 	cmd := exec.CommandContext(ctx, e.Binary, args...) //nolint:gosec // Binary was validated by ResolveCocoonBinary
 	cmd.Stdout = e.stderr()
 	cmd.Stderr = e.stderr()

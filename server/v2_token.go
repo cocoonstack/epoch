@@ -22,12 +22,13 @@ func publicBaseURL(r *http.Request) string {
 		scheme = "https"
 	}
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		scheme = strings.ToLower(strings.TrimSpace(strings.SplitN(proto, ",", 2)[0]))
+		first, _, _ := strings.Cut(proto, ",")
+		scheme = strings.ToLower(strings.TrimSpace(first))
 	}
 	host := r.Host
 	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
-		host = strings.SplitN(h, ",", 2)[0]
-		host = strings.TrimSpace(host)
+		first, _, _ := strings.Cut(h, ",")
+		host = strings.TrimSpace(first)
 	}
 	return scheme + "://" + host
 }

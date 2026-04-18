@@ -24,14 +24,16 @@ const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
 
 // Server is the Epoch HTTP server providing OCI Distribution and control plane APIs.
 type Server struct {
-	reg           *registry.Registry
-	store         *store.Store
-	addr          string
-	router        *mux.Router
-	sso           *SSOConfig // nil = UI auth disabled
-	registryToken string     // Bearer token for /v2/ (empty = no token required)
-	uploads       *uploadSessions
-	uiHandler     http.Handler
+	addr          string     // config
+	registryToken string     // config — Bearer token for /v2/ (empty = no token required)
+	sso           *SSOConfig // config — nil = UI auth disabled
+
+	reg   *registry.Registry // resources
+	store *store.Store       // resources
+
+	router    *mux.Router     // runtime
+	uploads   *uploadSessions // runtime
+	uiHandler http.Handler    // runtime
 }
 
 // New creates a Server with routes, auth, and upload sessions configured.
@@ -48,12 +50,12 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 		logger.Info(ctx, "registry token auth enabled")
 	}
 	s := &Server{
+		addr:          addr,
+		registryToken: regToken,
+		sso:           sso,
 		reg:           reg,
 		store:         st,
-		addr:          addr,
 		router:        mux.NewRouter(),
-		sso:           sso,
-		registryToken: regToken,
 		uploads:       newUploadSessions(resolveUploadDir(ctx)),
 	}
 	s.setupRoutes(ctx)

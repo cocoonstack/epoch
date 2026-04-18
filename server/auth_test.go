@@ -3,6 +3,8 @@ package server
 import (
 	"os"
 	"testing"
+
+	"github.com/cocoonstack/cocoon-common/auth"
 )
 
 func TestLoadSSOConfigGoogle(t *testing.T) {
@@ -105,19 +107,19 @@ func TestDetectProvider(t *testing.T) {
 
 func TestSignAndVerifySessionRoundTrip(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
-	want := &session{
+	want := &auth.Session{
 		User:  "Alice",
 		Email: "alice@example.com",
 		Exp:   1234567890,
 	}
 
-	signed := signSession(*want, key)
-	got, ok := verifySession(signed, key)
+	signed := auth.SignSession(*want, key)
+	got, ok := auth.VerifySession(signed, key)
 	if !ok {
-		t.Fatalf("verifySession returned false")
+		t.Fatalf("VerifySession returned false")
 	}
 	if got.User != want.User || got.Email != want.Email || got.Exp != want.Exp {
-		t.Fatalf("verifySession() = %+v, want %+v", got, want)
+		t.Fatalf("VerifySession() = %+v, want %+v", got, want)
 	}
 }
 

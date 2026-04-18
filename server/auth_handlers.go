@@ -11,6 +11,8 @@ import (
 
 	"github.com/projecteru2/core/log"
 
+	"github.com/cocoonstack/cocoon-common/auth"
+
 	"github.com/cocoonstack/epoch/utils"
 )
 
@@ -28,7 +30,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "UI auth not configured", http.StatusNotImplemented)
 		return
 	}
-	state := randomState()
+	state := auth.RandomState()
 	http.SetCookie(w, &http.Cookie{
 		Name: "sso_state", Value: state,
 		Path: "/", MaxAge: 300, HttpOnly: true, SameSite: http.SameSiteLaxMode,
@@ -156,8 +158,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := session{User: user.Name, Email: user.Email, Exp: time.Now().Unix() + cookieMaxAge}
-	signed := signSession(sess, s.sso.CookieSecret)
+	sess := auth.Session{User: user.Name, Email: user.Email, Exp: time.Now().Unix() + cookieMaxAge}
+	signed := auth.SignSession(sess, s.sso.CookieSecret)
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: signed,
 		Path: "/", MaxAge: cookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
