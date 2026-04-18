@@ -173,11 +173,13 @@ make build          # produces ./epoch
 - Bearer token from `EPOCH_REGISTRY_TOKEN` or tokens created via the UI
 - Tokens are validated by SHA-256 hash against MySQL
 - When neither is set, `/v2/` writes are open to anonymous clients
+- Anonymous pull is always allowed — unauthenticated OCI clients can pull without credentials
 
 **Web UI and control API**:
 
 - Disabled by default (open access)
 - Set `SSO_PROVIDER=google` or `SSO_PROVIDER=oidc` to enable session-based login
+- Only UI-managed tokens and SSO sessions grant access to `/api/*`; the static `EPOCH_REGISTRY_TOKEN` is scoped to `/v2/` writes only
 - See [epoch-server.yaml](epoch-server.yaml) for the full list of SSO variables
 
 ### CLI client
@@ -190,6 +192,7 @@ the following env vars:
 |---|---|
 | `EPOCH_SERVER` | Base URL of the epoch HTTP server (default `http://127.0.0.1:8080`) |
 | `EPOCH_REGISTRY_TOKEN` | Bearer token for write operations; same value as the server-side env |
+| `EPOCH_CA_CERT` | Path to a PEM-encoded CA certificate file for TLS verification against registries using custom CAs |
 | `EPOCH_COCOON_BINARY` | Override the `cocoon` binary path used by `epoch push` / `epoch pull` (default looks up `cocoon` on `$PATH`) |
 
 ### Upload spool

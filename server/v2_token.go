@@ -83,16 +83,7 @@ func extractTokenCandidate(r *http.Request) string {
 }
 
 func (s *Server) tokenIsValid(r *http.Request, candidate string) bool {
-	if candidate == "" {
-		return false
-	}
-	if s.registryToken != "" && candidate == s.registryToken {
-		return true
-	}
-	if s.store != nil && s.store.ValidateToken(r.Context(), candidate) {
-		return true
-	}
-	return false
+	return candidate != "" && s.isValidToken(r.Context(), candidate)
 }
 
 func (s *Server) writeTokenResponse(w http.ResponseWriter, token string) {

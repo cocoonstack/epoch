@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strings"
@@ -103,18 +104,18 @@ func bearerToken(r *http.Request) string {
 	return token
 }
 
+// isValidToken reports whether candidate is an accepted registry token.
+// It checks the static push token first, then store-managed tokens.
+func (s *Server) isValidToken(ctx context.Context, candidate string) bool {
+	if s.registryToken != "" && candidate == s.registryToken {
+		return true
+	}
+	return s.store != nil && s.store.ValidateToken(ctx, candidate)
+}
+
 func (s *Server) validateBearer(r *http.Request) bool {
 	token := bearerToken(r)
-	if token == "" {
-		return false
-	}
-	if s.registryToken != "" && token == s.registryToken {
-		return true
-	}
-	if s.store != nil && s.store.ValidateToken(r.Context(), token) {
-		return true
-	}
-	return false
+	return token != "" && s.isValidToken(r.Context(), token)
 }
 
 // validateAPIBearer validates Bearer tokens for the UI/API surface.
@@ -122,11 +123,5 @@ func (s *Server) validateBearer(r *http.Request) bool {
 // access to /api/*; the static registry push token is intentionally excluded.
 func (s *Server) validateAPIBearer(r *http.Request) bool {
 	token := bearerToken(r)
-	if token == "" {
-		return false
-	}
-	if s.store != nil && s.store.ValidateToken(r.Context(), token) {
-		return true
-	}
-	return false
+	return token != "" && s.store != nil && s.store.ValidateToken(r.Context(), token)
 }
