@@ -46,6 +46,8 @@ type tokenResponse struct {
 }
 
 // v2Token validates credentials and echoes the token back.
+// When no credentials are supplied, an anonymous (empty) token is issued
+// so that standard OCI clients can complete the auth flow for pull access.
 func (s *Server) v2Token(w http.ResponseWriter, r *http.Request) {
 	if !s.v2WritesRequireAuth() {
 		s.writeTokenResponse(w, "")
@@ -54,8 +56,7 @@ func (s *Server) v2Token(w http.ResponseWriter, r *http.Request) {
 
 	candidate := extractTokenCandidate(r)
 	if candidate == "" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="`+tokenServiceName+`"`)
-		http.Error(w, "credentials required", http.StatusUnauthorized)
+		s.writeTokenResponse(w, "")
 		return
 	}
 

@@ -9,11 +9,6 @@ import (
 
 func (s *Server) v2Check(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Distribution-API-Version", "registry/2.0")
-	if s.v2WritesRequireAuth() && !s.validateBearer(r) {
-		w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
-		v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 

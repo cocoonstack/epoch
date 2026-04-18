@@ -14,5 +14,9 @@ func resolveConfig() (serverURL, token string) {
 
 func newRegistryClient() *registryclient.Client {
 	serverURL, token := resolveConfig()
-	return registryclient.New(serverURL, token)
+	var opts []registryclient.Option
+	if ca := os.Getenv("EPOCH_CA_CERT"); ca != "" {
+		opts = append(opts, registryclient.WithCACert(ca))
+	}
+	return registryclient.New(serverURL, token, opts...)
 }

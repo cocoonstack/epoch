@@ -71,7 +71,7 @@ func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handl
 }
 
 func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	if s.validateBearer(r) {
+	if s.validateAPIBearer(r) {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -94,14 +94,36 @@ func (s *Server) v2WritesRequireAuth() bool {
 	return s.registryToken != "" || s.store != nil
 }
 
-func (s *Server) validateBearer(r *http.Request) bool {
+func bearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(auth, "Bearer ")
 	if token == "" || token == auth {
+		return ""
+	}
+	return token
+}
+
+func (s *Server) validateBearer(r *http.Request) bool {
+	token := bearerToken(r)
+	if token == "" {
 		return false
 	}
 	if s.registryToken != "" && token == s.registryToken {
 		return true
+	}
+	if s.store != nil && s.store.ValidateToken(r.Context(), token) {
+		return true
+	}
+	return false
+}
+
+// validateAPIBearer validates Bearer tokens for the UI/API surface.
+// Only store-managed tokens (and SSO sessions, handled separately) grant
+// access to /api/*; the static registry push token is intentionally excluded.
+func (s *Server) validateAPIBearer(r *http.Request) bool {
+	token := bearerToken(r)
+	if token == "" {
+		return false
 	}
 	if s.store != nil && s.store.ValidateToken(r.Context(), token) {
 		return true

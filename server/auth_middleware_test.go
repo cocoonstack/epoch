@@ -195,6 +195,26 @@ func TestWithAuthV2WriteOpenWhenNoTokenConfigured(t *testing.T) {
 	}
 }
 
+// TestRegistryTokenCannotAccessAPI ensures the static registry push token
+// does NOT grant access to the management API surface.
+func TestRegistryTokenCannotAccessAPI(t *testing.T) {
+	s := &Server{
+		registryToken: "push-secret",
+		sso:           &SSOConfig{}, // SSO enabled so unauthenticated requests are rejected
+	}
+	h := s.withAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not have been reached with registry token on /api/")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tokens", nil)
+	req.Header.Set("Authorization", "Bearer push-secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
 // TestWithAuthDownloadIsPublic ensures /dl/ bypasses auth even when a
 // token is configured.
 func TestWithAuthDownloadIsPublic(t *testing.T) {
