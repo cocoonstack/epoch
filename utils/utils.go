@@ -55,8 +55,8 @@ func HumanSize(b int64) string {
 
 // ParseRef splits "name:tag" into name and tag; defaults tag to "latest".
 func ParseRef(ref string) (string, string) {
-	if i := strings.LastIndex(ref, ":"); i > 0 {
-		return ref[:i], ref[i+1:]
+	if name, tag, ok := strings.Cut(ref, ":"); ok && name != "" {
+		return name, tag
 	}
 	return ref, "latest"
 }

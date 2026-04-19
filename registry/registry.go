@@ -299,13 +299,17 @@ func manifestDigestKey(name, digest string) string {
 
 func extractTag(key string) string {
 	// "manifests/foo/bar.json" → "bar"
-	idx := strings.LastIndex(key, "/")
-	if idx < 0 {
+	key, ok := strings.CutSuffix(key, ".json")
+	if !ok {
 		return ""
 	}
-	name, ok := strings.CutSuffix(key[idx+1:], ".json")
-	if !ok || name == "" {
+	_, tag, found := strings.Cut(key, "/") // skip "manifests"
+	if !found {
 		return ""
 	}
-	return name
+	_, tag, found = strings.Cut(tag, "/") // skip name
+	if !found || tag == "" {
+		return ""
+	}
+	return tag
 }
