@@ -2,7 +2,7 @@
 
 REPO_PATH := github.com/cocoonstack/epoch
 BINARY_NAME := epoch
-GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
+GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/epoch
 REVISION := $(shell git rev-parse HEAD || echo unknown)
 BUILTAT := $(shell date +%Y-%m-%dT%H:%M:%S)
 VERSION := $(shell git describe --tags $(shell git rev-list --tags --max-count=1) 2>/dev/null || echo dev)
@@ -101,7 +101,7 @@ fmt: gofumpt goimports ## Format code with gofumpt and goimports
 
 fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting)
 	@test -z "$$($(GOFMT) -l .)" || { echo "Files need formatting (gofumpt):"; $(GOFMT) -l .; exit 1; }
-	@test -z "$$($(GOIMPORTS) -l .)" || { echo "Files need formatting (goimports):"; $(GOIMPORTS) -l .; exit 1; }
+	@test -z "$$($(GOIMPORTS) -l --local '$(GOIMPORTS_LOCAL_PREFIXES)' .)" || { echo "Files need formatting (goimports):"; $(GOIMPORTS) -l --local '$(GOIMPORTS_LOCAL_PREFIXES)' .; exit 1; }
 
 # --- Server ---
 
