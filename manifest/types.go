@@ -121,6 +121,9 @@ type SnapshotConfig struct {
 	SnapshotID    string                  `json:"snapshotId"`
 	Description   string                  `json:"description,omitempty"`
 	Image         string                  `json:"image,omitempty"`
+	ImageDigest   string                  `json:"imageDigest,omitempty"`
+	ImageType     string                  `json:"imageType,omitempty"`
+	ImageRepo     string                  `json:"imageRepo,omitempty"`
 	ImageBlobIDs  map[string]struct{}     `json:"imageBlobIds,omitempty"`
 	Hypervisor    string                  `json:"hypervisor,omitempty"`
 	CPU           int                     `json:"cpu,omitempty"`
