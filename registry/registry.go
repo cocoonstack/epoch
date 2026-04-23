@@ -150,21 +150,22 @@ func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest stri
 
 // ListTags returns all tags for a repository, skipping by-digest copies.
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
-	keys, err := r.client.List(ctx, "manifests/"+name+"/")
+	repoPrefix := "manifests/" + name + "/"
+	keys, err := r.client.List(ctx, repoPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("list manifests for %s: %w", name, err)
 	}
-	digestPrefix := "manifests/" + name + "/_digests/"
+	digestPrefix := repoPrefix + "_digests/"
 	tags := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if strings.HasPrefix(k, digestPrefix) {
 			continue
 		}
-		// k is like "manifests/sre-agent/v2.json"
-		tag := extractTag(k)
-		if tag != "" {
-			tags = append(tags, tag)
+		tag, ok := tagFromKey(k, repoPrefix)
+		if !ok {
+			continue
 		}
+		tags = append(tags, tag)
 	}
 	return tags, nil
 }
@@ -316,19 +317,20 @@ func manifestDigestKey(name, digest string) string {
 	return "manifests/" + name + "/_digests/" + strings.ReplaceAll(digest, ":", "-") + ".json"
 }
 
-func extractTag(key string) string {
-	// "manifests/foo/bar.json" → "bar"
-	key, ok := strings.CutSuffix(key, ".json")
+// tagFromKey extracts the tag from a "<repoPrefix><tag>.json" object key.
+// Repository names may contain slashes (e.g. "windows/win11"), so we strip the
+// known prefix instead of assuming a fixed number of path segments.
+func tagFromKey(key, repoPrefix string) (string, bool) {
+	rest, ok := strings.CutPrefix(key, repoPrefix)
 	if !ok {
-		return ""
+		return "", false
 	}
-	_, tag, found := strings.Cut(key, "/") // skip "manifests"
-	if !found {
-		return ""
+	tag, ok := strings.CutSuffix(rest, ".json")
+	if !ok || tag == "" {
+		return "", false
 	}
-	_, tag, found = strings.Cut(tag, "/") // skip name
-	if !found || tag == "" {
-		return ""
+	if strings.Contains(tag, "/") {
+		return "", false
 	}
-	return tag
+	return tag, true
 }
