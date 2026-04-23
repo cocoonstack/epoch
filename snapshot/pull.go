@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/projecteru2/core/log"
+
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/utils"
 )
@@ -85,8 +87,9 @@ type StreamOptions struct {
 }
 
 // Stream reassembles a snapshot manifest into a cocoon-import tar stream.
-// If raw is an OCI image-index (multi-platform), the linux/amd64 child is
-// resolved via dl.GetManifest(..., childDigest) and streamed instead.
+// If raw is an OCI image-index (multi-platform), a child manifest is resolved
+// via dl.GetManifest(..., childDigest) and streamed instead — preferring
+// linux/amd64, falling back to the first non-attestation entry.
 func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
 		return errors.New("snapshot stream: name is required")
@@ -101,7 +104,7 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	}
 
 	if manifest.ClassifyParsed(m) == manifest.KindImageIndex {
-		child, err := pickIndexChild(m)
+		child, err := pickIndexChild(ctx, m)
 		if err != nil {
 			return err
 		}
@@ -166,7 +169,9 @@ func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 
 // pickIndexChild selects the linux/amd64 child from an OCI image-index and
 // falls back to the first non-attestation entry when no platform matches.
-func pickIndexChild(m *manifest.OCIManifest) (manifest.IndexManifest, error) {
+// A fallback selection is logged at Warn so operators can see which child
+// was actually streamed instead of silently shipping a non-amd64 snapshot.
+func pickIndexChild(ctx context.Context, m *manifest.OCIManifest) (manifest.IndexManifest, error) {
 	var fallback *manifest.IndexManifest
 	for i := range m.Manifests {
 		c := m.Manifests[i]
@@ -178,9 +183,12 @@ func pickIndexChild(m *manifest.OCIManifest) (manifest.IndexManifest, error) {
 		}
 	}
 	if fallback != nil {
+		log.WithFunc("snapshot.pickIndexChild").Warnf(ctx,
+			"image-index has no linux/amd64 child, falling back to %s/%s (%s)",
+			fallback.Platform.OS, fallback.Platform.Architecture, fallback.Digest)
 		return *fallback, nil
 	}
-	return manifest.IndexManifest{}, errors.New("image-index has no linux/amd64 child")
+	return manifest.IndexManifest{}, errors.New("image-index has no usable platform child")
 }
 
 func writeImportTar(ctx context.Context, dl Downloader, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {
