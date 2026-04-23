@@ -129,10 +129,14 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	return r.removeCatalogEntry(ctx, name, tag)
 }
 
-// DeleteManifestByDigest removes the digest-addressed manifest copy. It errors
-// with ErrNotFound if the manifest does not exist, so callers can surface the
-// canonical 404 instead of a silent 202 after the object store swallows the
-// missing-object error on Delete.
+// DeleteManifestByDigest removes the digest-addressed manifest copy and
+// unlinks every tag whose content resolves to the same digest, as required
+// by the OCI distribution spec (end-2b: "The tags and references to the
+// manifest MUST be removed from the registry if the manifest is deleted.").
+//
+// Returns ErrNotFound when the digest copy does not exist, so callers can
+// surface the canonical 404 instead of a silent 202 after the object store
+// swallows the missing-object error on Delete.
 func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest string) error {
 	key := manifestDigestKey(name, digest)
 	exists, err := r.client.Exists(ctx, key)
@@ -144,6 +148,43 @@ func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest stri
 	}
 	if err := r.client.Delete(ctx, key); err != nil {
 		return fmt.Errorf("delete manifest %s@%s: %w", name, digest, err)
+	}
+	// Tag unlinking runs after the digest copy is gone. If it fails partway,
+	// the digest-delete itself already succeeded; any remaining tag rows will
+	// be reaped by the next catalog sync or a later tag-targeted delete. We
+	// don't roll the digest copy back into the store on partial failure.
+	if err := r.unlinkTagsByDigest(ctx, name, digest); err != nil {
+		return fmt.Errorf("unlink tags for %s@%s: %w", name, digest, err)
+	}
+	return nil
+}
+
+// unlinkTagsByDigest removes every tag under name whose content hashes to
+// digest. Individual tag read/delete failures are surfaced so the caller can
+// decide whether to log or propagate.
+func (r *Registry) unlinkTagsByDigest(ctx context.Context, name, digest string) error {
+	tags, err := r.ListTags(ctx, name)
+	if err != nil {
+		return fmt.Errorf("list tags: %w", err)
+	}
+	want := digest
+	if !strings.HasPrefix(want, "sha256:") {
+		want = "sha256:" + want
+	}
+	for _, tag := range tags {
+		raw, err := r.ManifestJSON(ctx, name, tag)
+		if err != nil {
+			if errors.Is(err, objectstore.ErrNotFound) {
+				continue
+			}
+			return fmt.Errorf("read tag %s: %w", tag, err)
+		}
+		if "sha256:"+utils.SHA256Hex(raw) != want {
+			continue
+		}
+		if err := r.DeleteManifest(ctx, name, tag); err != nil {
+			return fmt.Errorf("delete tag %s: %w", tag, err)
+		}
 	}
 	return nil
 }
