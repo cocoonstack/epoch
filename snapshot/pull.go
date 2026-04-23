@@ -85,6 +85,8 @@ type StreamOptions struct {
 }
 
 // Stream reassembles a snapshot manifest into a cocoon-import tar stream.
+// If raw is an OCI image-index (multi-platform), the linux/amd64 child is
+// resolved via dl.GetManifest(..., childDigest) and streamed instead.
 func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
 		return errors.New("snapshot stream: name is required")
@@ -97,11 +99,46 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	if err != nil {
 		return fmt.Errorf("parse manifest: %w", err)
 	}
+
+	if manifest.ClassifyParsed(m) == manifest.KindImageIndex {
+		child, err := pickIndexChild(m)
+		if err != nil {
+			return err
+		}
+		childRaw, _, err := dl.GetManifest(ctx, opts.Name, child.Digest)
+		if err != nil {
+			return fmt.Errorf("get child manifest %s: %w", child.Digest, err)
+		}
+		m, err = manifest.Parse(childRaw)
+		if err != nil {
+			return fmt.Errorf("parse child manifest: %w", err)
+		}
+	}
+
 	if kind := manifest.ClassifyParsed(m); kind != manifest.KindSnapshot {
 		return fmt.Errorf("manifest is %s, not a snapshot", kind)
 	}
 
 	return StreamParsed(ctx, m, dl, opts)
+}
+
+// pickIndexChild selects the linux/amd64 child from an OCI image-index and
+// falls back to the first non-attestation entry when no platform matches.
+func pickIndexChild(m *manifest.OCIManifest) (manifest.IndexManifest, error) {
+	var fallback *manifest.IndexManifest
+	for i := range m.Manifests {
+		c := m.Manifests[i]
+		if c.Platform != nil && c.Platform.OS == "linux" && c.Platform.Architecture == "amd64" {
+			return c, nil
+		}
+		if fallback == nil && c.Platform != nil && c.Platform.Architecture != "unknown" {
+			fallback = &m.Manifests[i]
+		}
+	}
+	if fallback != nil {
+		return *fallback, nil
+	}
+	return manifest.IndexManifest{}, errors.New("image-index has no linux/amd64 child")
 }
 
 // StreamParsed accepts an already-parsed manifest.
