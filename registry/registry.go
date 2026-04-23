@@ -137,6 +137,12 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 // Returns ErrNotFound when the digest copy does not exist, so callers can
 // surface the canonical 404 instead of a silent 202 after the object store
 // swallows the missing-object error on Delete.
+//
+// Unlinking runs BEFORE the digest copy is removed so the operation stays
+// retryable: a partial failure leaves the digest file in place, and a retry
+// re-enters this function, re-lists surviving tags, and resumes cleanup.
+// unlinkTagsByDigest is itself idempotent — object-store Delete swallows
+// not-found and removeCatalogEntry is a no-op on missing entries.
 func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest string) error {
 	key := manifestDigestKey(name, digest)
 	exists, err := r.client.Exists(ctx, key)
@@ -146,15 +152,11 @@ func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest stri
 	if !exists {
 		return fmt.Errorf("manifest %s@%s: %w", name, digest, objectstore.ErrNotFound)
 	}
-	if err := r.client.Delete(ctx, key); err != nil {
-		return fmt.Errorf("delete manifest %s@%s: %w", name, digest, err)
-	}
-	// Tag unlinking runs after the digest copy is gone. If it fails partway,
-	// the digest-delete itself already succeeded; any remaining tag rows will
-	// be reaped by the next catalog sync or a later tag-targeted delete. We
-	// don't roll the digest copy back into the store on partial failure.
 	if err := r.unlinkTagsByDigest(ctx, name, digest); err != nil {
 		return fmt.Errorf("unlink tags for %s@%s: %w", name, digest, err)
+	}
+	if err := r.client.Delete(ctx, key); err != nil {
+		return fmt.Errorf("delete manifest %s@%s: %w", name, digest, err)
 	}
 	return nil
 }
