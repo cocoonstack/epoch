@@ -171,6 +171,8 @@ func TestPushProducesOCISnapshotManifest(t *testing.T) {
 		Name:         "myvm",
 		Description:  "snapshot desc",
 		Image:        "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
+		ImageDigest:  "sha256:abc123def456",
+		ImageType:    "oci",
 		ImageBlobIDs: map[string]struct{}{"blob-a": {}},
 		Hypervisor:   "cloud-hypervisor",
 		CPU:          4,
@@ -269,6 +271,12 @@ func TestPushProducesOCISnapshotManifest(t *testing.T) {
 	if _, ok := snapCfg.ImageBlobIDs["blob-a"]; !ok {
 		t.Errorf("config blob missing image blob IDs: %+v", snapCfg.ImageBlobIDs)
 	}
+	if snapCfg.ImageDigest != "sha256:abc123def456" {
+		t.Errorf("config blob ImageDigest = %q, want %q", snapCfg.ImageDigest, "sha256:abc123def456")
+	}
+	if snapCfg.ImageType != "oci" {
+		t.Errorf("config blob ImageType = %q, want %q", snapCfg.ImageType, "oci")
+	}
 }
 
 func TestPushOmitsBaseImageAnnotationWhenEmpty(t *testing.T) {
@@ -303,6 +311,8 @@ func TestPullReassemblesTarFromOCISnapshot(t *testing.T) {
 		Name:         "myvm",
 		Description:  "restored desc",
 		Image:        "ghcr.io/cocoonstack/cocoon/ubuntu:24.04",
+		ImageDigest:  "sha256:abc123def456",
+		ImageType:    "oci",
 		ImageBlobIDs: map[string]struct{}{"blob-b": {}},
 		Hypervisor:   "cloud-hypervisor",
 		CPU:          2,
@@ -369,6 +379,12 @@ func TestPullReassemblesTarFromOCISnapshot(t *testing.T) {
 	}
 	if _, ok := gotEnvelope.Config.ImageBlobIDs["blob-b"]; !ok {
 		t.Errorf("envelope image blob IDs missing: %+v", gotEnvelope.Config.ImageBlobIDs)
+	}
+	if gotEnvelope.Config.ImageDigest != "sha256:abc123def456" {
+		t.Errorf("envelope ImageDigest = %q, want %q", gotEnvelope.Config.ImageDigest, "sha256:abc123def456")
+	}
+	if gotEnvelope.Config.ImageType != "oci" {
+		t.Errorf("envelope ImageType = %q, want %q", gotEnvelope.Config.ImageType, "oci")
 	}
 
 	for name, want := range files {

@@ -214,7 +214,6 @@ func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *sna
 		Image:         cfg.Image,
 		ImageDigest:   cfg.ImageDigest,
 		ImageType:     cfg.ImageType,
-		ImageRepo:     cfg.ImageRepo,
 		ImageBlobIDs:  cfg.ImageBlobIDs,
 		Hypervisor:    cfg.Hypervisor,
 		CPU:           cfg.CPU,

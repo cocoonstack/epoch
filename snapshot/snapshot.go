@@ -146,7 +146,6 @@ type snapshotExportConfig struct {
 	Image        string              `json:"image,omitempty"`
 	ImageDigest  string              `json:"image_digest,omitempty"`
 	ImageType    string              `json:"image_type,omitempty"`
-	ImageRepo    string              `json:"image_repo,omitempty"`
 	ImageBlobIDs map[string]struct{} `json:"image_blob_ids,omitempty"`
 	Hypervisor   string              `json:"hypervisor,omitempty"`
 	CPU          int                 `json:"cpu,omitempty"`
