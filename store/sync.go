@@ -38,7 +38,7 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 		return nil
 	}
 
-	pending, err := s.prepareSync(ctx, cat, reg)
+	pending, degraded, err := s.prepareSync(ctx, cat, reg)
 	if err != nil {
 		return err
 	}
@@ -47,6 +47,12 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	}
 
 	s.cleanOrphans(ctx, cat)
+	// Rebuild the blobs index from the authoritative descriptor set. Skipped on
+	// degraded syncs (any tag fetch failed) to avoid pruning blobs whose tags
+	// are temporarily unreachable.
+	if !degraded {
+		s.reconcileBlobs(ctx, pending)
+	}
 	s.lastCatalogHash = digest
 	return nil
 }
@@ -55,23 +61,26 @@ type pendingTag struct {
 	repoName    string
 	tag         Tag
 	descriptors []manifest.Descriptor
+	needsCommit bool
 }
 
-func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry) ([]pendingTag, error) {
+func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry) ([]pendingTag, bool, error) {
 	var pending []pendingTag
+	degraded := false
 	for repoName, repo := range cat.Repositories {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, degraded, err
 		}
 		for _, tagName := range slices.Sorted(maps.Keys(repo.Tags)) {
 			p, ok := s.prepareTag(ctx, reg, repoName, tagName)
 			if !ok {
+				degraded = true
 				continue
 			}
 			pending = append(pending, p)
 		}
 	}
-	return pending, nil
+	return pending, degraded, nil
 }
 
 func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName, tagName string) (pendingTag, bool) {
@@ -87,13 +96,7 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 		return pendingTag{}, false
 	}
 
-	// Force resync for index tags missing platform_sizes (backfill).
 	digest := utils.SHA256Hex(raw)
-	needsPlatformBackfill := existing.kind == manifest.KindImageIndex.String() && !existing.hasPlatformSizes
-	if digest == existing.digest && !needsPlatformBackfill {
-		return pendingTag{}, false
-	}
-
 	m, err := manifest.Parse(raw)
 	if err != nil {
 		logger.Errorf(ctx, err, "decode manifest %s:%s", repoName, tagName)
@@ -101,6 +104,9 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 	}
 
 	kind := manifest.ClassifyParsed(m)
+	needsPlatformBackfill := existing.kind == manifest.KindImageIndex.String() && !existing.hasPlatformSizes
+	needsCommit := digest != existing.digest || needsPlatformBackfill
+
 	totalSize, layerCount, descriptors, platformSizes := tagAggregates(ctx, reg, repoName, m, kind)
 
 	return pendingTag{
@@ -117,6 +123,7 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 			PushedAt:      manifestPushedAt(m),
 		},
 		descriptors: descriptors,
+		needsCommit: needsCommit,
 	}, true
 }
 
@@ -145,6 +152,9 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 	}
 
 	for _, p := range pending {
+		if !p.needsCommit {
+			continue
+		}
 		repoID, ok := repoIDs[p.repoName]
 		if !ok {
 			continue
@@ -152,9 +162,6 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 		if err := upsertTagTx(ctx, tx, repoID, p.tag); err != nil {
 			logger.Errorf(ctx, err, "upsert tag %s:%s", p.repoName, p.tag.Name)
 			continue
-		}
-		if err := batchUpsertBlobsTx(ctx, tx, p.descriptors); err != nil {
-			logger.Errorf(ctx, err, "batch upsert blobs for %s:%s", p.repoName, p.tag.Name)
 		}
 	}
 
@@ -297,23 +304,86 @@ func manifestPushedAt(m *manifest.OCIManifest) time.Time {
 	return time.Now().UTC()
 }
 
-func batchUpsertBlobsTx(ctx context.Context, tx *sql.Tx, descriptors []manifest.Descriptor) error {
-	if len(descriptors) == 0 {
+type blobAggregate struct {
+	size      int64
+	mediaType string
+	refCount  int
+}
+
+// aggregateBlobs collapses descriptors from all pending tags into one row per
+// digest, counting how many tags reference each blob.
+func aggregateBlobs(pending []pendingTag) map[string]blobAggregate {
+	out := make(map[string]blobAggregate)
+	for _, p := range pending {
+		seen := make(map[string]bool, len(p.descriptors))
+		for _, d := range p.descriptors {
+			if d.Digest == "" || seen[d.Digest] {
+				continue
+			}
+			seen[d.Digest] = true
+			key := strings.TrimPrefix(d.Digest, "sha256:")
+			agg := out[key]
+			agg.size = d.Size
+			agg.mediaType = d.MediaType
+			agg.refCount++
+			out[key] = agg
+		}
+	}
+	return out
+}
+
+// reconcileBlobs rewrites the blobs table to match the authoritative set
+// derived from current catalog tags. Runs in one transaction: truncate, then
+// bulk insert. Dashboard COUNT(*) FROM blobs becomes consistent with
+// actually-referenced blobs after every sync.
+func (s *Store) reconcileBlobs(ctx context.Context, pending []pendingTag) {
+	logger := log.WithFunc("store.reconcileBlobs")
+	aggregates := aggregateBlobs(pending)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		logger.Errorf(ctx, err, "begin tx")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM blobs`); err != nil {
+		logger.Errorf(ctx, err, "clear blobs")
+		return
+	}
+	if err := bulkInsertBlobsTx(ctx, tx, aggregates); err != nil {
+		logger.Errorf(ctx, err, "bulk insert blobs")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		logger.Errorf(ctx, err, "commit reconcile")
+	}
+}
+
+func bulkInsertBlobsTx(ctx context.Context, tx *sql.Tx, aggregates map[string]blobAggregate) error {
+	if len(aggregates) == 0 {
 		return nil
 	}
-	const batchSize = 100
-	for batch := range slices.Chunk(descriptors, batchSize) {
+	const batchSize = 500
+	type row struct {
+		digest string
+		agg    blobAggregate
+	}
+	rows := make([]row, 0, len(aggregates))
+	for digest, agg := range aggregates {
+		rows = append(rows, row{digest: digest, agg: agg})
+	}
+	for batch := range slices.Chunk(rows, batchSize) {
 		var sb strings.Builder
 		sb.WriteString(`INSERT INTO blobs (digest, size, media_type, ref_count) VALUES `)
-		args := make([]any, 0, len(batch)*3)
-		for j, d := range batch {
+		args := make([]any, 0, len(batch)*4)
+		for j, r := range batch {
 			if j > 0 {
 				sb.WriteString(",")
 			}
-			sb.WriteString("(?,?,?,1)")
-			args = append(args, strings.TrimPrefix(d.Digest, "sha256:"), d.Size, d.MediaType)
+			sb.WriteString("(?,?,?,?)")
+			args = append(args, r.digest, r.agg.size, r.agg.mediaType, r.agg.refCount)
 		}
-		sb.WriteString(` ON DUPLICATE KEY UPDATE size=VALUES(size), media_type=VALUES(media_type)`)
 		if _, err := tx.ExecContext(ctx, sb.String(), args...); err != nil {
 			return err
 		}
