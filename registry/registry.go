@@ -19,9 +19,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const (
-	catalogCacheTTL = 10 * time.Second
-)
+const catalogCacheTTL = 10 * time.Second
 
 // Registry is the storage facade. Safe for concurrent use.
 type Registry struct {

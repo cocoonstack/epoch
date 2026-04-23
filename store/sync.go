@@ -18,9 +18,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const (
-	indexFetchConcurrency = 4
-)
+const indexFetchConcurrency = 4
 
 var errSyncInProgress = errors.New("sync already in progress")
 
@@ -80,12 +78,12 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 	logger := log.WithFunc("store.prepareTag")
 	existing, dbErr := s.getTagSyncState(ctx, repoName, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
-		logger.Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
+		logger.Errorf(ctx, dbErr, "lookup existing digest for %s:%s", repoName, tagName)
 	}
 
 	raw, err := reg.ManifestJSON(ctx, repoName, tagName)
 	if err != nil {
-		logger.Warnf(ctx, "fetch manifest %s:%s: %v", repoName, tagName, err)
+		logger.Errorf(ctx, err, "fetch manifest %s:%s", repoName, tagName)
 		return pendingTag{}, false
 	}
 
@@ -98,7 +96,7 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		logger.Warnf(ctx, "decode manifest %s:%s: %v", repoName, tagName, err)
+		logger.Errorf(ctx, err, "decode manifest %s:%s", repoName, tagName)
 		return pendingTag{}, false
 	}
 
@@ -140,7 +138,7 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 		}
 		repoID, err := upsertRepositoryTx(ctx, tx, p.repoName)
 		if err != nil {
-			logger.Warnf(ctx, "upsert repo %s: %v", p.repoName, err)
+			logger.Errorf(ctx, err, "upsert repo %s", p.repoName)
 			continue
 		}
 		repoIDs[p.repoName] = repoID
@@ -152,11 +150,11 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 			continue
 		}
 		if err := upsertTagTx(ctx, tx, repoID, p.tag); err != nil {
-			logger.Warnf(ctx, "upsert tag %s:%s: %v", p.repoName, p.tag.Name, err)
+			logger.Errorf(ctx, err, "upsert tag %s:%s", p.repoName, p.tag.Name)
 			continue
 		}
 		if err := batchUpsertBlobsTx(ctx, tx, p.descriptors); err != nil {
-			logger.Warnf(ctx, "batch upsert blobs for %s:%s: %v", p.repoName, p.tag.Name, err)
+			logger.Errorf(ctx, err, "batch upsert blobs for %s:%s", p.repoName, p.tag.Name)
 		}
 	}
 
@@ -234,12 +232,12 @@ func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName st
 
 			raw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
 			if err != nil {
-				logger.Warnf(ctx, "fetch index child %s@%s: %v", repoName, child.Digest, err)
+				logger.Errorf(ctx, err, "fetch index child %s@%s", repoName, child.Digest)
 				return
 			}
 			parsed, err := manifest.Parse(raw)
 			if err != nil {
-				logger.Warnf(ctx, "parse index child %s@%s: %v", repoName, child.Digest, err)
+				logger.Errorf(ctx, err, "parse index child %s@%s", repoName, child.Digest)
 				return
 			}
 			results[i] = &fetchedChild{digest: child.Digest, parsed: parsed}
@@ -339,7 +337,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 			return r.Scan(&row.repoID, &row.repoName, &row.tagName)
 		})
 	if err != nil {
-		logger.Warnf(ctx, "list repositories: %v", err)
+		logger.Errorf(ctx, err, "list repositories")
 		return
 	}
 
@@ -364,7 +362,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 		catRepo, exists := cat.Repositories[r.name]
 		if !exists {
 			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM repositories WHERE id = ?`, r.id); delErr != nil {
-				logger.Warnf(ctx, "delete orphan repository %s: %v", r.name, delErr)
+				logger.Errorf(ctx, delErr, "delete orphan repository %s", r.name)
 			}
 			continue
 		}
@@ -373,7 +371,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 				continue
 			}
 			if _, delErr := s.db.ExecContext(ctx, `DELETE FROM tags WHERE repository_id = ? AND name = ?`, r.id, tagName); delErr != nil {
-				logger.Warnf(ctx, "delete orphan tag %s:%s: %v", r.name, tagName, delErr)
+				logger.Errorf(ctx, delErr, "delete orphan tag %s:%s", r.name, tagName)
 			}
 		}
 	}

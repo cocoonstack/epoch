@@ -13,9 +13,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const (
-	tokenCacheTTL = 30 * time.Second
-)
+const tokenCacheTTL = 30 * time.Second
 
 type tokenCacheEntry struct {
 	valid   bool

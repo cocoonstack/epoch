@@ -3,6 +3,7 @@ package server
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -113,7 +114,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tok.AccessToken == "" {
-		logger.Warnf(ctx, "no access_token: %s", body)
+		logger.Errorf(ctx, errors.New(cmp.Or(tok.Error, "no access_token")), "sso token exchange: %s", body)
 		http.Error(w, "SSO login failed: "+tok.Error, http.StatusBadGateway)
 		return
 	}

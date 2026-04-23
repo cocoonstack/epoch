@@ -11,9 +11,7 @@ import (
 	"github.com/cocoonstack/epoch/objectstore"
 )
 
-const (
-	defaultManifestMediaType = manifest.MediaTypeOCIManifest
-)
+const defaultManifestMediaType = manifest.MediaTypeOCIManifest
 
 func urlVar(r *http.Request, name string) string {
 	return mux.Vars(r)[name]
