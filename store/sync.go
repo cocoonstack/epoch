@@ -337,7 +337,7 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 			return r.Scan(&row.repoID, &row.repoName, &row.tagName)
 		})
 	if err != nil {
-		logger.Errorf(ctx, err, "list repositories")
+		logger.Error(ctx, err, "list repositories")
 		return
 	}
 
