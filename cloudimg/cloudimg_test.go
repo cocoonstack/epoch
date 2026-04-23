@@ -22,7 +22,15 @@ func (f fakeBlobs) ReadBlob(_ context.Context, digest string) (io.ReadCloser, er
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
-const winManifest = `{
+const (
+	diskBlobA = "AAAA"
+	diskBlobB = "BBBB"
+	// Real sha256 digests of the byte contents above; required by CopyBlobExact's digest check.
+	digestA = "sha256:63c1dd951ffedf6f7fd968ad4efa39b8ed584f162f46e715114ee184f8de9201"
+	digestB = "sha256:4a8d8134f29b0b7b60c126f5532bc9f5d9bb73037373cf6fb872d81f1dcefdfd"
+)
+
+var winManifest = `{
   "schemaVersion": 2,
   "mediaType": "application/vnd.oci.image.manifest.v1+json",
   "artifactType": "application/vnd.cocoonstack.os-image.v1+json",
@@ -30,7 +38,7 @@ const winManifest = `{
   "layers": [
     {
       "mediaType": "application/vnd.cocoonstack.disk.qcow2.part",
-      "digest": "sha256:bb",
+      "digest": "` + digestB + `",
       "size": 4,
       "annotations": {"org.opencontainers.image.title": "win.qcow2.01.qcow2.part"}
     },
@@ -42,7 +50,7 @@ const winManifest = `{
     },
     {
       "mediaType": "application/vnd.cocoonstack.disk.qcow2.part",
-      "digest": "sha256:aa",
+      "digest": "` + digestA + `",
       "size": 4,
       "annotations": {"org.opencontainers.image.title": "win.qcow2.00.qcow2.part"}
     }
@@ -51,8 +59,8 @@ const winManifest = `{
 
 func TestStreamConcatenatesDiskLayersInTitleOrder(t *testing.T) {
 	blobs := fakeBlobs{
-		"sha256:aa": []byte("AAAA"),
-		"sha256:bb": []byte("BBBB"),
+		digestA:     []byte(diskBlobA),
+		digestB:     []byte(diskBlobB),
 		"sha256:cc": []byte("ignored-sha256sums"),
 	}
 
@@ -156,8 +164,8 @@ func TestPullerPipesAssembledDiskToCocoonImport(t *testing.T) {
 		manifest:    []byte(winManifest),
 		contentType: manifest.MediaTypeOCIManifest,
 		blobs: map[string][]byte{
-			"sha256:aa": []byte("AAAA"),
-			"sha256:bb": []byte("BBBB"),
+			digestA:     []byte(diskBlobA),
+			digestB:     []byte(diskBlobB),
 			"sha256:cc": []byte("ignored"),
 		},
 	}

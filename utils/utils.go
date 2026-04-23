@@ -14,9 +14,10 @@ func SHA256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CopyBlobExact copies exactly size bytes and errors on mismatch.
+// CopyBlobExact copies exactly size bytes and verifies both length and sha256 digest.
 func CopyBlobExact(dst io.Writer, body io.Reader, digest string, size int64) error {
-	written, err := io.CopyN(dst, body, size)
+	h := sha256.New()
+	written, err := io.CopyN(io.MultiWriter(dst, h), body, size)
 	if err != nil {
 		return fmt.Errorf("copy blob %s: %w", digest, err)
 	}
@@ -25,6 +26,14 @@ func CopyBlobExact(dst io.Writer, body io.Reader, digest string, size int64) err
 	}
 	if written != size {
 		return fmt.Errorf("blob %s shorter than manifest size %d (got %d)", digest, size, written)
+	}
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	want := digest
+	if !strings.HasPrefix(want, "sha256:") {
+		want = "sha256:" + want
+	}
+	if got != want {
+		return fmt.Errorf("blob %s digest mismatch: got %s", digest, got)
 	}
 	return nil
 }

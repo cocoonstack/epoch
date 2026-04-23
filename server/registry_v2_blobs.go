@@ -51,17 +51,11 @@ func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) v2PutBlob(w http.ResponseWriter, r *http.Request) {
+	name := urlVar(r, "name")
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
 	if dgst == "" {
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID", "missing or invalid digest")
 		return
 	}
-
-	if err := s.reg.PushBlobFromStream(r.Context(), dgst, r.Body, r.ContentLength); err != nil {
-		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_UNKNOWN", err.Error())
-		return
-	}
-
-	w.Header().Set("Docker-Content-Digest", "sha256:"+dgst)
-	w.WriteHeader(http.StatusCreated)
+	s.persistMonolithicUpload(w, r, name, "sha256:"+dgst)
 }
