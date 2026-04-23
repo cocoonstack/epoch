@@ -342,21 +342,21 @@ func (s *Store) reconcileBlobs(ctx context.Context, pending []pendingTag) {
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		logger.Errorf(ctx, err, "begin tx")
+		logger.Error(ctx, err, "begin reconcile tx")
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM blobs`); err != nil {
-		logger.Errorf(ctx, err, "clear blobs")
+		logger.Error(ctx, err, "clear blobs")
 		return
 	}
 	if err := bulkInsertBlobsTx(ctx, tx, aggregates); err != nil {
-		logger.Errorf(ctx, err, "bulk insert blobs")
+		logger.Error(ctx, err, "bulk insert blobs")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		logger.Errorf(ctx, err, "commit reconcile")
+		logger.Error(ctx, err, "commit reconcile")
 	}
 }
 
