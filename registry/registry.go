@@ -129,6 +129,25 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	return r.removeCatalogEntry(ctx, name, tag)
 }
 
+// DeleteManifestByDigest removes the digest-addressed manifest copy. It errors
+// with ErrNotFound if the manifest does not exist, so callers can surface the
+// canonical 404 instead of a silent 202 after the object store swallows the
+// missing-object error on Delete.
+func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest string) error {
+	key := manifestDigestKey(name, digest)
+	exists, err := r.client.Exists(ctx, key)
+	if err != nil {
+		return fmt.Errorf("head manifest %s@%s: %w", name, digest, err)
+	}
+	if !exists {
+		return fmt.Errorf("manifest %s@%s: %w", name, digest, objectstore.ErrNotFound)
+	}
+	if err := r.client.Delete(ctx, key); err != nil {
+		return fmt.Errorf("delete manifest %s@%s: %w", name, digest, err)
+	}
+	return nil
+}
+
 // ListTags returns all tags for a repository, skipping by-digest copies.
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
 	keys, err := r.client.List(ctx, "manifests/"+name+"/")

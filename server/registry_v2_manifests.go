@@ -75,7 +75,14 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) v2DeleteManifest(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	ref := urlVar(r, "reference")
-	if err := s.reg.DeleteManifest(r.Context(), name, ref); err != nil {
+
+	var err error
+	if isDigestRef(ref) {
+		err = s.reg.DeleteManifestByDigest(r.Context(), name, ref)
+	} else {
+		err = s.reg.DeleteManifest(r.Context(), name, ref)
+	}
+	if err != nil {
 		if isNotFound(err) {
 			v2Error(w, http.StatusNotFound, "MANIFEST_UNKNOWN", fmt.Sprintf("manifest %s:%s not found", name, ref))
 			return
