@@ -87,6 +87,15 @@ func New(baseURL, token string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
+// NewFromEnv is New with WithCACert auto-applied from EPOCH_CA_CERT when set,
+// so callers don't have to repeat the `if ca := os.Getenv(...)` dance.
+func NewFromEnv(baseURL, token string, opts ...Option) (*Client, error) {
+	if ca := os.Getenv("EPOCH_CA_CERT"); ca != "" {
+		opts = append(opts, WithCACert(ca))
+	}
+	return New(baseURL, token, opts...)
+}
+
 // BaseURL returns the registry base URL.
 func (c *Client) BaseURL() string {
 	return c.baseURL
@@ -121,6 +130,20 @@ func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, str
 		return nil, "", err
 	}
 	return data, resp.Header.Get("Content-Type"), nil
+}
+
+// HasManifest reports whether (name, reference) exists by wrapping GetManifest
+// and folding ErrManifestNotFound into (false, nil). Other errors propagate.
+func (c *Client) HasManifest(ctx context.Context, name, reference string) (bool, error) {
+	_, _, err := c.GetManifest(ctx, name, reference)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrManifestNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // PutManifest uploads a manifest under the given tag.

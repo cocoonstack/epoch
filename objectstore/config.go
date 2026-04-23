@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/url"
@@ -9,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cocoonstack/epoch/utils"
+	commonk8s "github.com/cocoonstack/cocoon-common/k8s"
 )
 
 // Config holds S3-compatible object store connection settings.
@@ -25,7 +26,7 @@ type Config struct {
 
 // ConfigFromEnv reads S3 settings from environment, falling back to ~/.config/epoch/s3.env.
 func ConfigFromEnv(prefix string) (*Config, error) {
-	envFile := utils.FirstNonEmpty(os.Getenv("EPOCH_S3_ENV_FILE"), filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
+	envFile := commonk8s.EnvOrDefault("EPOCH_S3_ENV_FILE", filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
 
 	endpoint := os.Getenv("EPOCH_S3_ENDPOINT")
 	accessKey := os.Getenv("EPOCH_S3_ACCESS_KEY")
@@ -33,17 +34,17 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 	bucket := os.Getenv("EPOCH_S3_BUCKET")
 	region := os.Getenv("EPOCH_S3_REGION")
 	secureRaw := os.Getenv("EPOCH_S3_SECURE")
-	prefixValue := utils.FirstNonEmpty(os.Getenv("EPOCH_S3_PREFIX"), prefix)
+	prefixValue := cmp.Or(os.Getenv("EPOCH_S3_PREFIX"), prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
 		if err := loadEnvFile(envFile); err == nil {
-			endpoint = utils.FirstNonEmpty(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
-			accessKey = utils.FirstNonEmpty(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
-			secretKey = utils.FirstNonEmpty(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
-			bucket = utils.FirstNonEmpty(bucket, os.Getenv("EPOCH_S3_BUCKET"))
-			region = utils.FirstNonEmpty(region, os.Getenv("EPOCH_S3_REGION"))
-			secureRaw = utils.FirstNonEmpty(secureRaw, os.Getenv("EPOCH_S3_SECURE"))
-			prefixValue = utils.FirstNonEmpty(prefixValue, os.Getenv("EPOCH_S3_PREFIX"))
+			endpoint = cmp.Or(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
+			accessKey = cmp.Or(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
+			secretKey = cmp.Or(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
+			bucket = cmp.Or(bucket, os.Getenv("EPOCH_S3_BUCKET"))
+			region = cmp.Or(region, os.Getenv("EPOCH_S3_REGION"))
+			secureRaw = cmp.Or(secureRaw, os.Getenv("EPOCH_S3_SECURE"))
+			prefixValue = cmp.Or(prefixValue, os.Getenv("EPOCH_S3_PREFIX"))
 		}
 	}
 

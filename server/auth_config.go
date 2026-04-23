@@ -1,15 +1,15 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
 	"strings"
 
+	commonk8s "github.com/cocoonstack/cocoon-common/k8s"
 	"github.com/projecteru2/core/log"
-
-	"github.com/cocoonstack/epoch/utils"
 )
 
 const (
@@ -39,7 +39,7 @@ type SSOConfig struct {
 // LoadSSOConfig reads SSO provider settings from environment variables.
 func LoadSSOConfig(ctx context.Context) *SSOConfig {
 	logger := log.WithFunc("server.LoadSSOConfig")
-	provider := strings.ToLower(utils.FirstNonEmpty(os.Getenv("SSO_PROVIDER"), detectProvider()))
+	provider := strings.ToLower(cmp.Or(os.Getenv("SSO_PROVIDER"), detectProvider()))
 	if provider == "" {
 		return nil
 	}
@@ -83,11 +83,11 @@ func loadProviderConfig(provider string) *SSOConfig {
 			ClientID:      os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
 			ClientSecret:  os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
 			RedirectURI:   os.Getenv("GOOGLE_OAUTH_REDIRECT_URI"),
-			AuthorizeURL:  utils.FirstNonEmpty(os.Getenv("SSO_AUTHORIZE_URL"), defaultGoogleAuthorizeURL),
-			TokenURL:      utils.FirstNonEmpty(os.Getenv("SSO_TOKEN_URL"), defaultGoogleTokenURL),
-			UserInfoURL:   utils.FirstNonEmpty(os.Getenv("SSO_USERINFO_URL"), defaultGoogleUserInfoURL),
+			AuthorizeURL:  commonk8s.EnvOrDefault("SSO_AUTHORIZE_URL", defaultGoogleAuthorizeURL),
+			TokenURL:      commonk8s.EnvOrDefault("SSO_TOKEN_URL", defaultGoogleTokenURL),
+			UserInfoURL:   commonk8s.EnvOrDefault("SSO_USERINFO_URL", defaultGoogleUserInfoURL),
 			LogoutURL:     os.Getenv("SSO_LOGOUT_URL"),
-			Scopes:        utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
+			Scopes:        commonk8s.EnvOrDefault("SSO_SCOPES", "openid profile email"),
 			HostedDomains: parseHostedDomains(os.Getenv("GOOGLE_OAUTH_HOSTED_DOMAIN")),
 		}
 	case providerOIDC:
@@ -100,7 +100,7 @@ func loadProviderConfig(provider string) *SSOConfig {
 			TokenURL:     os.Getenv("SSO_TOKEN_URL"),
 			UserInfoURL:  os.Getenv("SSO_USERINFO_URL"),
 			LogoutURL:    os.Getenv("SSO_LOGOUT_URL"),
-			Scopes:       utils.FirstNonEmpty(os.Getenv("SSO_SCOPES"), "openid profile email"),
+			Scopes:       commonk8s.EnvOrDefault("SSO_SCOPES", "openid profile email"),
 		}
 	default:
 		return nil

@@ -8,16 +8,6 @@ import (
 	"strings"
 )
 
-// FirstNonEmpty returns the first non-blank value from the given strings.
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 // SHA256Hex returns the hex-encoded SHA-256 digest of data.
 func SHA256Hex(data []byte) string {
 	h := sha256.Sum256(data)

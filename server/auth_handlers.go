@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,8 +12,6 @@ import (
 
 	"github.com/cocoonstack/cocoon-common/auth"
 	"github.com/projecteru2/core/log"
-
-	"github.com/cocoonstack/epoch/utils"
 )
 
 const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
@@ -38,7 +37,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"client_id":     {s.sso.ClientID},
 		"redirect_uri":  {s.sso.RedirectURI},
 		"response_type": {"code"},
-		"scope":         {utils.FirstNonEmpty(s.sso.Scopes, "openid profile email")},
+		"scope":         {cmp.Or(s.sso.Scopes, "openid profile email")},
 		"state":         {state},
 	}
 	if s.sso.Provider == providerGoogle && len(s.sso.HostedDomains) == 1 {
