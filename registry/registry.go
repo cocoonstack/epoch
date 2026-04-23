@@ -41,11 +41,11 @@ func New(client *objectstore.Client) *Registry {
 func NewFromEnv() (*Registry, error) {
 	cfg, err := objectstore.ConfigFromEnv("epoch/")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load registry config: %w", err)
 	}
 	client, err := objectstore.New(cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("init object store: %w", err)
 	}
 	return New(client), nil
 }

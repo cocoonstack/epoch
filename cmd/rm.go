@@ -20,10 +20,10 @@ Blobs are NOT deleted (they may be shared with other tags).`,
 			name, tag := utils.ParseRef(args[0])
 			client, err := newRegistryClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("create registry client: %w", err)
 			}
 			if err := client.DeleteManifest(ctx, name, tag); err != nil {
-				return err
+				return fmt.Errorf("delete manifest %s:%s: %w", name, tag, err)
 			}
 			fmt.Printf("Removed %s:%s\n", name, tag)
 			return nil

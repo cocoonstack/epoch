@@ -40,11 +40,11 @@ Requires EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 
 			cocoonBin, err := snapshot.ResolveCocoonBinary(os.Getenv(snapshot.CocoonBinaryEnv))
 			if err != nil {
-				return err
+				return fmt.Errorf("resolve cocoon binary: %w", err)
 			}
 			client, err := newRegistryClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("create registry client: %w", err)
 			}
 			cocoon := &snapshot.ExecCocoon{Binary: cocoonBin, Stderr: os.Stderr}
 

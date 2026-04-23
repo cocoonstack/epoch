@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/projecteru2/core/log"
-
 	"github.com/cocoonstack/cocoon-common/auth"
+	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/utils"
 )

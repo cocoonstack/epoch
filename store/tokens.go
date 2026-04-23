@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/projecteru2/core/log"
@@ -25,14 +26,14 @@ type tokenCacheEntry struct {
 func (s *Store) CreateToken(ctx context.Context, name, createdBy string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate token: %w", err)
 	}
 	plaintext := hex.EncodeToString(raw)
 	hash := utils.SHA256Hex([]byte(plaintext))
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (name, token_hash, created_by) VALUES (?, ?, ?)`,
 		name, hash, createdBy)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("insert token: %w", err)
 	}
 	return plaintext, nil
 }
@@ -47,8 +48,10 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 // DeleteToken removes a token by ID and invalidates the cache.
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	s.InvalidateTokenCache()
-	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id)
-	return err
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete token %d: %w", id, err)
+	}
+	return nil
 }
 
 // ValidateToken checks whether a plaintext token is valid, using a cache.

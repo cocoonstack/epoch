@@ -40,13 +40,11 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 		return nil
 	}
 
-	logger := log.WithFunc("store.SyncFromCatalog")
-
-	pending, err := s.prepareSync(ctx, cat, reg, logger)
+	pending, err := s.prepareSync(ctx, cat, reg)
 	if err != nil {
 		return err
 	}
-	if err := s.commitSync(ctx, pending, logger); err != nil {
+	if err := s.commitSync(ctx, pending); err != nil {
 		return err
 	}
 
@@ -61,14 +59,14 @@ type pendingTag struct {
 	descriptors []manifest.Descriptor
 }
 
-func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry, logger *log.Fields) ([]pendingTag, error) {
+func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry) ([]pendingTag, error) {
 	var pending []pendingTag
 	for repoName, repo := range cat.Repositories {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		for _, tagName := range slices.Sorted(maps.Keys(repo.Tags)) {
-			p, ok := s.prepareTag(ctx, reg, repoName, tagName, logger)
+			p, ok := s.prepareTag(ctx, reg, repoName, tagName)
 			if !ok {
 				continue
 			}
@@ -78,7 +76,8 @@ func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *reg
 	return pending, nil
 }
 
-func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName, tagName string, logger *log.Fields) (pendingTag, bool) {
+func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName, tagName string) (pendingTag, bool) {
+	logger := log.WithFunc("store.prepareTag")
 	existing, dbErr := s.getTagSyncState(ctx, repoName, tagName)
 	if dbErr != nil && !errors.Is(dbErr, sql.ErrNoRows) {
 		logger.Warnf(ctx, "lookup existing digest for %s:%s: %v", repoName, tagName, dbErr)
@@ -104,7 +103,7 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 	}
 
 	kind := manifest.ClassifyParsed(m)
-	totalSize, layerCount, descriptors, platformSizes := tagAggregates(ctx, reg, repoName, m, kind, logger)
+	totalSize, layerCount, descriptors, platformSizes := tagAggregates(ctx, reg, repoName, m, kind)
 
 	return pendingTag{
 		repoName: repoName,
@@ -123,10 +122,11 @@ func (s *Store) prepareTag(ctx context.Context, reg *registry.Registry, repoName
 	}, true
 }
 
-func (s *Store) commitSync(ctx context.Context, pending []pendingTag, logger *log.Fields) error {
+func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 	if len(pending) == 0 {
 		return nil
 	}
+	logger := log.WithFunc("store.commitSync")
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -167,9 +167,9 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag, logger *lo
 }
 
 // tagAggregates returns totals for a manifest; for indexes, dedupes across platforms.
-func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
+func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind) (int64, int, []manifest.Descriptor, PlatformSizes) {
 	if kind == manifest.KindImageIndex {
-		return expandIndexAggregates(ctx, reg, repoName, m, logger)
+		return expandIndexAggregates(ctx, reg, repoName, m)
 	}
 	totalSize := m.Config.Size
 	for _, layer := range m.Layers {
@@ -179,8 +179,8 @@ func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string,
 	return totalSize, len(m.Layers), descriptors, nil
 }
 
-func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, logger *log.Fields) (int64, int, []manifest.Descriptor, PlatformSizes) {
-	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests, logger)
+func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest) (int64, int, []manifest.Descriptor, PlatformSizes) {
+	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests)
 
 	seen := make(map[string]bool)
 	var totalSize int64
@@ -218,12 +218,13 @@ type fetchedChild struct {
 	parsed *manifest.OCIManifest
 }
 
-func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest, logger *log.Fields) []*fetchedChild {
+func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest) []*fetchedChild {
 	results := make([]*fetchedChild, len(children))
 	if len(children) == 0 {
 		return results
 	}
 
+	logger := log.WithFunc("store.fetchIndexChildren")
 	sem := make(chan struct{}, indexFetchConcurrency)
 	var wg sync.WaitGroup
 	for i, child := range children {
