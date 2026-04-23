@@ -159,7 +159,12 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := auth.Session{User: user.Name, Email: user.Email, Exp: time.Now().Unix() + cookieMaxAge}
-	signed := auth.SignSession(sess, s.sso.CookieSecret)
+	signed, err := auth.SignSession(sess, s.sso.CookieSecret)
+	if err != nil {
+		logger.Error(ctx, err, "sign session")
+		http.Error(w, "sign session", http.StatusInternalServerError)
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: signed,
 		Path: "/", MaxAge: cookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,

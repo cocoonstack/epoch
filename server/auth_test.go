@@ -113,7 +113,10 @@ func TestSignAndVerifySessionRoundTrip(t *testing.T) {
 		Exp:   1234567890,
 	}
 
-	signed := auth.SignSession(*want, key)
+	signed, err := auth.SignSession(*want, key)
+	if err != nil {
+		t.Fatalf("SignSession: %v", err)
+	}
 	got, ok := auth.VerifySession(signed, key)
 	if !ok {
 		t.Fatalf("VerifySession returned false")
