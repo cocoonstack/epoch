@@ -47,12 +47,14 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	}
 
 	s.cleanOrphans(ctx, cat)
-	// Rebuild the blobs index from the authoritative descriptor set. Skipped on
-	// degraded syncs (any tag fetch failed) to avoid pruning blobs whose tags
-	// are temporarily unreachable.
-	if !degraded {
-		s.reconcileBlobs(ctx, pending)
+	// On degraded syncs (any tag fetch failed) skip blob reconciliation AND
+	// leave lastCatalogHash untouched so the next tick retries instead of
+	// early-exiting on an unchanged catalog hash — otherwise a transient
+	// fetch error would freeze stale metadata until catalog.json next mutates.
+	if degraded {
+		return nil
 	}
+	s.reconcileBlobs(ctx, pending)
 	s.lastCatalogHash = digest
 	return nil
 }
