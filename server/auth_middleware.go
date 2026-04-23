@@ -108,9 +108,9 @@ func (s *Server) v2WritesRequireAuth() bool {
 }
 
 func bearerToken(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == "" || token == auth {
+	header := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(header, "Bearer ")
+	if token == "" || token == header {
 		return ""
 	}
 	return token

@@ -122,25 +122,6 @@ func Stream(ctx context.Context, raw []byte, dl Downloader, opts StreamOptions) 
 	return StreamParsed(ctx, m, dl, opts)
 }
 
-// pickIndexChild selects the linux/amd64 child from an OCI image-index and
-// falls back to the first non-attestation entry when no platform matches.
-func pickIndexChild(m *manifest.OCIManifest) (manifest.IndexManifest, error) {
-	var fallback *manifest.IndexManifest
-	for i := range m.Manifests {
-		c := m.Manifests[i]
-		if c.Platform != nil && c.Platform.OS == "linux" && c.Platform.Architecture == "amd64" {
-			return c, nil
-		}
-		if fallback == nil && c.Platform != nil && c.Platform.Architecture != "unknown" {
-			fallback = &m.Manifests[i]
-		}
-	}
-	if fallback != nil {
-		return *fallback, nil
-	}
-	return manifest.IndexManifest{}, errors.New("image-index has no linux/amd64 child")
-}
-
 // StreamParsed accepts an already-parsed manifest.
 func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, opts StreamOptions) error {
 	if opts.Name == "" {
@@ -181,6 +162,25 @@ func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 		return nil, fmt.Errorf("parse snapshot config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// pickIndexChild selects the linux/amd64 child from an OCI image-index and
+// falls back to the first non-attestation entry when no platform matches.
+func pickIndexChild(m *manifest.OCIManifest) (manifest.IndexManifest, error) {
+	var fallback *manifest.IndexManifest
+	for i := range m.Manifests {
+		c := m.Manifests[i]
+		if c.Platform != nil && c.Platform.OS == "linux" && c.Platform.Architecture == "amd64" {
+			return c, nil
+		}
+		if fallback == nil && c.Platform != nil && c.Platform.Architecture != "unknown" {
+			fallback = &m.Manifests[i]
+		}
+	}
+	if fallback != nil {
+		return *fallback, nil
+	}
+	return manifest.IndexManifest{}, errors.New("image-index has no linux/amd64 child")
 }
 
 func writeImportTar(ctx context.Context, dl Downloader, name, localName string, cfg *manifest.SnapshotConfig, layers []manifest.Descriptor, w io.Writer, progress func(string)) error {

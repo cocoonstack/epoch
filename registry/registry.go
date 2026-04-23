@@ -161,36 +161,6 @@ func (r *Registry) DeleteManifestByDigest(ctx context.Context, name, digest stri
 	return nil
 }
 
-// unlinkTagsByDigest removes every tag under name whose content hashes to
-// digest. Individual tag read/delete failures are surfaced so the caller can
-// decide whether to log or propagate.
-func (r *Registry) unlinkTagsByDigest(ctx context.Context, name, digest string) error {
-	tags, err := r.ListTags(ctx, name)
-	if err != nil {
-		return fmt.Errorf("list tags: %w", err)
-	}
-	want := digest
-	if !strings.HasPrefix(want, "sha256:") {
-		want = "sha256:" + want
-	}
-	for _, tag := range tags {
-		raw, err := r.ManifestJSON(ctx, name, tag)
-		if err != nil {
-			if errors.Is(err, objectstore.ErrNotFound) {
-				continue
-			}
-			return fmt.Errorf("read tag %s: %w", tag, err)
-		}
-		if "sha256:"+utils.SHA256Hex(raw) != want {
-			continue
-		}
-		if err := r.DeleteManifest(ctx, name, tag); err != nil {
-			return fmt.Errorf("delete tag %s: %w", tag, err)
-		}
-	}
-	return nil
-}
-
 // ListTags returns all tags for a repository, skipping by-digest copies.
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
 	repoPrefix := "manifests/" + name + "/"
@@ -288,6 +258,36 @@ func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, err
 		cat.Repositories = make(map[string]*manifest.Repository)
 	}
 	return &cat, nil
+}
+
+// unlinkTagsByDigest removes every tag under name whose content hashes to
+// digest. Individual tag read/delete failures are surfaced so the caller can
+// decide whether to log or propagate.
+func (r *Registry) unlinkTagsByDigest(ctx context.Context, name, digest string) error {
+	tags, err := r.ListTags(ctx, name)
+	if err != nil {
+		return fmt.Errorf("list tags: %w", err)
+	}
+	want := digest
+	if !strings.HasPrefix(want, "sha256:") {
+		want = "sha256:" + want
+	}
+	for _, tag := range tags {
+		raw, err := r.ManifestJSON(ctx, name, tag)
+		if err != nil {
+			if errors.Is(err, objectstore.ErrNotFound) {
+				continue
+			}
+			return fmt.Errorf("read tag %s: %w", tag, err)
+		}
+		if "sha256:"+utils.SHA256Hex(raw) != want {
+			continue
+		}
+		if err := r.DeleteManifest(ctx, name, tag); err != nil {
+			return fmt.Errorf("delete tag %s: %w", tag, err)
+		}
+	}
+	return nil
 }
 
 func (r *Registry) invalidateCatalogCacheLocked() {
