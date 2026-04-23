@@ -163,6 +163,11 @@ func (s *Server) setupRoutes(ctx context.Context) {
 
 	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 
+	s.router.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}).Methods(http.MethodGet)
+
 	// SSO routes must be registered before the UI catchall.
 	if s.sso != nil {
 		s.setupAuthRoutes()
