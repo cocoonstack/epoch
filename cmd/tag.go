@@ -26,7 +26,10 @@ repository names must match).`,
 				return fmt.Errorf("cross-repository tagging not supported: %s vs %s", srcName, dstName)
 			}
 
-			client := newRegistryClient()
+			client, err := newRegistryClient()
+			if err != nil {
+				return err
+			}
 			data, contentType, err := client.GetManifest(ctx, srcName, srcTag)
 			if err != nil {
 				return fmt.Errorf("get manifest %s:%s: %w", srcName, srcTag, err)

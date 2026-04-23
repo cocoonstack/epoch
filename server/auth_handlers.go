@@ -145,8 +145,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Email        string `json:"email"`
 		HostedDomain string `json:"hd"`
 	}
-	if err := json.Unmarshal(body, &user); err != nil {
-		logger.Error(ctx, err, "userinfo parse failed")
+	if unmarshalErr := json.Unmarshal(body, &user); unmarshalErr != nil {
+		logger.Error(ctx, unmarshalErr, "userinfo parse failed")
 		http.Error(w, "invalid userinfo response", http.StatusBadGateway)
 		return
 	}

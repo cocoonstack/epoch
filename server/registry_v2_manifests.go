@@ -10,7 +10,9 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const manifestBodyLimit = 50 << 20
+const (
+	manifestBodyLimit = 50 << 20
+)
 
 func (s *Server) loadManifestRaw(r *http.Request, name, ref string) ([]byte, error) {
 	if isDigestRef(ref) {

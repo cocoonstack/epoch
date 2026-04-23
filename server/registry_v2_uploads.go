@@ -10,7 +10,9 @@ import (
 	"strconv"
 )
 
-const uploadBodyLimit = defaultUploadMaxBytes
+const (
+	uploadBodyLimit = defaultUploadMaxBytes
+)
 
 func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")

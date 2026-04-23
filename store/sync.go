@@ -18,7 +18,9 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const indexFetchConcurrency = 4
+const (
+	indexFetchConcurrency = 4
+)
 
 var errSyncInProgress = errors.New("sync already in progress")
 
@@ -225,9 +227,7 @@ func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName st
 	sem := make(chan struct{}, indexFetchConcurrency)
 	var wg sync.WaitGroup
 	for i, child := range children {
-		wg.Add(1)
-		go func(i int, child manifest.IndexManifest) {
-			defer wg.Done()
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -242,7 +242,7 @@ func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName st
 				return
 			}
 			results[i] = &fetchedChild{digest: child.Digest, parsed: parsed}
-		}(i, child)
+		})
 	}
 	wg.Wait()
 	return results

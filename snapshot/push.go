@@ -55,7 +55,7 @@ func (p *Pusher) Push(ctx context.Context, opts PushOptions) (*PushResult, error
 
 	stream, wait, err := p.Cocoon.Export(ctx, opts.Name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cocoon export %s: %w", opts.Name, err)
 	}
 
 	cfg, files, layers, readErr := p.readAndUploadEntries(ctx, opts.Name, stream, opts.Progress)
@@ -179,7 +179,7 @@ func (p *Pusher) uploadTarEntry(ctx context.Context, name string, hdr *tar.Heade
 			return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("seek temp: %w", seekErr)
 		}
 		if err := p.Uploader.PutBlob(ctx, name, digest, tmp, written); err != nil {
-			return manifest.Descriptor{}, manifest.SnapshotFile{}, err
+			return manifest.Descriptor{}, manifest.SnapshotFile{}, fmt.Errorf("put blob %s: %w", digest, err)
 		}
 	}
 
@@ -227,7 +227,7 @@ func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *sna
 	}
 	data, err := json.Marshal(cfgBlob)
 	if err != nil {
-		return manifest.Descriptor{}, err
+		return manifest.Descriptor{}, fmt.Errorf("marshal snapshot config: %w", err)
 	}
 
 	digest := "sha256:" + utils.SHA256Hex(data)
@@ -237,7 +237,7 @@ func (p *Pusher) uploadSnapshotConfig(ctx context.Context, name string, cfg *sna
 	}
 	if !exists {
 		if err := p.Uploader.PutBlob(ctx, name, digest, bytes.NewReader(data), int64(len(data))); err != nil {
-			return manifest.Descriptor{}, err
+			return manifest.Descriptor{}, fmt.Errorf("put config blob: %w", err)
 		}
 	}
 	return manifest.Descriptor{

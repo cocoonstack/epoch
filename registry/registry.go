@@ -19,7 +19,9 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-const catalogCacheTTL = 10 * time.Second
+const (
+	catalogCacheTTL = 10 * time.Second
+)
 
 // Registry is the storage facade. Safe for concurrent use.
 type Registry struct {
@@ -124,7 +126,7 @@ func (r *Registry) PushManifestJSONByDigest(ctx context.Context, name string, da
 // DeleteManifest removes a manifest tag and updates the catalog.
 func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 	if err := r.client.Delete(ctx, manifestKey(name, tag)); err != nil {
-		return err
+		return fmt.Errorf("delete manifest %s:%s: %w", name, tag, err)
 	}
 	return r.removeCatalogEntry(ctx, name, tag)
 }
@@ -133,7 +135,7 @@ func (r *Registry) DeleteManifest(ctx context.Context, name, tag string) error {
 func (r *Registry) ListTags(ctx context.Context, name string) ([]string, error) {
 	keys, err := r.client.List(ctx, "manifests/"+name+"/")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list manifests for %s: %w", name, err)
 	}
 	digestPrefix := "manifests/" + name + "/_digests/"
 	tags := make([]string, 0, len(keys))
@@ -168,7 +170,7 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 
 	var cat manifest.Catalog
 	if err := json.Unmarshal(raw, &cat); err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("decode catalog: %w", err)
 	}
 	if cat.Repositories == nil {
 		cat.Repositories = make(map[string]*manifest.Repository)
@@ -195,13 +197,13 @@ func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get catalog: %w", err)
 	}
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read catalog body: %w", err)
 	}
 
 	r.catalogCache = raw
@@ -212,14 +214,14 @@ func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, error) {
 	raw, err := r.getCatalogRawLocked(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get catalog: %w", err)
 	}
 	if raw == nil {
 		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
 	}
 	var cat manifest.Catalog
 	if err := json.Unmarshal(raw, &cat); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
 	if cat.Repositories == nil {
 		cat.Repositories = make(map[string]*manifest.Repository)
@@ -275,10 +277,10 @@ func (r *Registry) removeCatalogEntry(ctx context.Context, name, tag string) err
 func (r *Registry) putCatalog(ctx context.Context, cat *manifest.Catalog) error {
 	data, err := json.MarshalIndent(cat, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal catalog: %w", err)
 	}
 	if err := r.client.Put(ctx, "catalog.json", bytes.NewReader(data), int64(len(data))); err != nil {
-		return err
+		return fmt.Errorf("put catalog: %w", err)
 	}
 	r.invalidateCatalogCacheLocked()
 	return nil

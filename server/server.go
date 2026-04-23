@@ -20,7 +20,11 @@ import (
 	"github.com/cocoonstack/epoch/ui"
 )
 
-const defaultUploadSpoolDir = "/var/cache/epoch/uploads"
+const (
+	defaultUploadSpoolDir = "/var/cache/epoch/uploads"
+)
+
+var _ http.ResponseWriter = (*responseWriter)(nil)
 
 // Server is the Epoch HTTP server providing OCI Distribution and control plane APIs.
 type Server struct {
@@ -195,6 +199,7 @@ func serveOnListener(ctx context.Context, srv *http.Server, ln net.Listener) err
 		}
 		return err
 	case <-ctx.Done():
+		// must outlive canceled parent ctx for graceful shutdown
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -229,8 +234,6 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-var _ http.ResponseWriter = (*responseWriter)(nil)
 
 type responseWriter struct {
 	http.ResponseWriter

@@ -37,7 +37,10 @@ environment variables.`,
 				return err
 			}
 
-			client := newRegistryClient()
+			client, err := newRegistryClient()
+			if err != nil {
+				return err
+			}
 			pusher := &snapshot.Pusher{
 				Uploader: client,
 				Cocoon:   &snapshot.ExecCocoon{Binary: cocoonBin, Stderr: os.Stderr},

@@ -18,7 +18,11 @@ Blobs are NOT deleted (they may be shared with other tags).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			name, tag := utils.ParseRef(args[0])
-			if err := newRegistryClient().DeleteManifest(ctx, name, tag); err != nil {
+			client, err := newRegistryClient()
+			if err != nil {
+				return err
+			}
+			if err := client.DeleteManifest(ctx, name, tag); err != nil {
 				return err
 			}
 			fmt.Printf("Removed %s:%s\n", name, tag)

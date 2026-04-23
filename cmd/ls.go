@@ -26,7 +26,11 @@ func newLsCmd() *cobra.Command {
 }
 
 func lsRepos(ctx context.Context) error {
-	repos, err := newRegistryClient().Catalog(ctx)
+	client, err := newRegistryClient()
+	if err != nil {
+		return err
+	}
+	repos, err := client.Catalog(ctx)
 	if err != nil {
 		return err
 	}
@@ -42,7 +46,11 @@ func lsRepos(ctx context.Context) error {
 }
 
 func lsTags(ctx context.Context, name string) error {
-	tags, err := newRegistryClient().ListTags(ctx, name)
+	client, err := newRegistryClient()
+	if err != nil {
+		return err
+	}
+	tags, err := client.ListTags(ctx, name)
 	if err != nil {
 		return err
 	}

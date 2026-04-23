@@ -2,12 +2,12 @@
 package cloudimg
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/utils"
@@ -54,7 +54,7 @@ func diskLayers(layers []manifest.Descriptor) []manifest.Descriptor {
 		}
 	}
 	slices.SortStableFunc(out, func(a, b manifest.Descriptor) int {
-		return strings.Compare(a.Title(), b.Title())
+		return cmp.Compare(a.Title(), b.Title())
 	})
 	return out
 }

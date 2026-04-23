@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/go-sql-driver/mysql" // registers the "mysql" driver with database/sql
 )
 
 // Store provides MySQL-backed metadata queries and token management.
@@ -95,6 +95,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("exec DDL: %w", err)
 		}
 	}
+	// idempotent backfill, ignored if column already exists
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tokens DROP COLUMN token_plain`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN artifact_type VARCHAR(255) NOT NULL DEFAULT ''`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE tags ADD COLUMN kind VARCHAR(32) NOT NULL DEFAULT ''`)

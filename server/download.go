@@ -69,9 +69,9 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 
 	switch manifest.ClassifyParsed(m) {
 	case manifest.KindCloudImage:
-		s.streamCloudImage(w, r, name, m, logger)
+		s.streamCloudImage(w, r, name, m)
 	case manifest.KindSnapshot:
-		s.streamSnapshot(w, r, name, raw, m, logger)
+		s.streamSnapshot(w, r, name, raw, m)
 	case manifest.KindContainerImage:
 		http.Error(w, "container image — pull via OCI client (oras / crane / docker)", http.StatusMethodNotAllowed)
 	default:
@@ -88,7 +88,8 @@ type manifestStreamer interface {
 	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
 }
 
-func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest, logger *log.Fields) {
+func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest) {
+	logger := log.WithFunc("server.streamCloudImage")
 	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
 	w.WriteHeader(http.StatusOK)
 
@@ -97,7 +98,8 @@ func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name s
 	}
 }
 
-func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest, logger *log.Fields) {
+func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest) {
+	logger := log.WithFunc("server.streamSnapshot")
 	w.Header().Set("Content-Type", manifest.MediaTypeTar)
 	w.WriteHeader(http.StatusOK)
 

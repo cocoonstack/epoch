@@ -37,7 +37,10 @@ Examples:
 			ctx := cmd.Context()
 			name, tag := utils.ParseRef(args[0])
 
-			client := newRegistryClient()
+			client, err := newRegistryClient()
+			if err != nil {
+				return err
+			}
 			raw, _, err := client.GetManifest(ctx, name, tag)
 			if err != nil {
 				return fmt.Errorf("get manifest %s:%s: %w", name, tag, err)

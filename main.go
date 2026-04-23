@@ -17,7 +17,7 @@ func main() {
 	ctx := context.Background()
 	logLevel := utils.FirstNonEmpty(os.Getenv("EPOCH_LOG_LEVEL"), "info")
 	if err := log.SetupLog(ctx, &types.ServerLogConfig{Level: logLevel}, ""); err != nil {
-		log.WithFunc("main.main").Fatalf(ctx, err, "setup log: %v", err)
+		log.WithFunc("main").Fatalf(ctx, err, "setup log: %v", err)
 	}
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

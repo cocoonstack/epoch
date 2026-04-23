@@ -16,9 +16,6 @@ import (
 	"time"
 )
 
-// ErrManifestNotFound distinguishes 404 from transport errors.
-var ErrManifestNotFound = errors.New("registryclient: manifest not found")
-
 const (
 	defaultBaseURL    = "http://127.0.0.1:8080"
 	maxErrorBodyBytes = 512
@@ -29,6 +26,9 @@ const (
 		"application/vnd.docker.distribution.manifest.list.v2+json"
 )
 
+// ErrManifestNotFound distinguishes 404 from transport errors.
+var ErrManifestNotFound = errors.New("registryclient: manifest not found")
+
 // Client is an HTTP client for OCI Distribution registries.
 type Client struct {
 	baseURL    string
@@ -36,30 +36,33 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// Option configures a Client.
-type Option func(*Client)
+// Option configures a Client. It returns an error so misconfigured
+// options (e.g. unreadable CA cert) surface to the caller instead of
+// panicking.
+type Option func(*Client) error
 
 // WithCACert loads a PEM-encoded CA certificate file and adds it to the
 // TLS root pool so the client can verify registries using custom CAs.
 func WithCACert(path string) Option {
-	return func(c *Client) {
+	return func(c *Client) error {
 		pem, err := os.ReadFile(path) //nolint:gosec // CA cert path from trusted caller configuration
 		if err != nil {
-			panic(fmt.Sprintf("registryclient: read CA cert %s: %v", path, err))
+			return fmt.Errorf("read CA cert %s: %w", path, err)
 		}
 		pool, err := x509.SystemCertPool()
 		if err != nil {
 			pool = x509.NewCertPool()
 		}
 		if !pool.AppendCertsFromPEM(pem) {
-			panic(fmt.Sprintf("registryclient: no valid certificates in %s", path))
+			return fmt.Errorf("no valid certificates in %s", path)
 		}
 		c.httpClient.Transport.(*http.Transport).TLSClientConfig = &tls.Config{RootCAs: pool} //nolint:gosec // CA pool explicitly configured by caller
+		return nil
 	}
 }
 
 // New creates a client. Empty baseURL defaults to http://127.0.0.1:8080.
-func New(baseURL, token string, opts ...Option) *Client {
+func New(baseURL, token string, opts ...Option) (*Client, error) {
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -77,9 +80,11 @@ func New(baseURL, token string, opts ...Option) *Client {
 		},
 	}
 	for _, opt := range opts {
-		opt(c)
+		if err := opt(c); err != nil {
+			return nil, err
+		}
 	}
-	return c
+	return c, nil
 }
 
 // BaseURL returns the registry base URL.

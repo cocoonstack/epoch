@@ -85,7 +85,10 @@ func TestClientV2RoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "token-123")
+	c, err := New(srv.URL, "token-123")
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
 	ctx := t.Context()
 
 	data, ct, err := c.GetManifest(ctx, repoName, "latest")
@@ -152,8 +155,11 @@ func TestGetManifestNotFoundReturnsSentinel(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
-	_, _, err := c.GetManifest(t.Context(), "demo", "missing")
+	c, err := New(srv.URL, "")
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+	_, _, err = c.GetManifest(t.Context(), "demo", "missing")
 	if err == nil {
 		t.Fatalf("GetManifest on 404 must return an error")
 	}
@@ -169,7 +175,10 @@ func TestDeleteManifestNotFoundIsSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
+	c, err := New(srv.URL, "")
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
 	if err := c.DeleteManifest(t.Context(), "demo", "gone"); err != nil {
 		t.Errorf("DeleteManifest on 404 should succeed, got %v", err)
 	}
@@ -182,8 +191,11 @@ func TestGetManifestServerErrorNotConfusedWithNotFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(srv.URL, "")
-	_, _, err := c.GetManifest(t.Context(), "demo", "boom")
+	c, err := New(srv.URL, "")
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+	_, _, err = c.GetManifest(t.Context(), "demo", "boom")
 	if err == nil {
 		t.Fatalf("GetManifest on 500 must return an error")
 	}

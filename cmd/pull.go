@@ -42,7 +42,10 @@ Requires EPOCH_SERVER and EPOCH_REGISTRY_TOKEN environment variables.`,
 			if err != nil {
 				return err
 			}
-			client := newRegistryClient()
+			client, err := newRegistryClient()
+			if err != nil {
+				return err
+			}
 			cocoon := &snapshot.ExecCocoon{Binary: cocoonBin, Stderr: os.Stderr}
 
 			raw, _, err := client.GetManifest(ctx, name, tag)
