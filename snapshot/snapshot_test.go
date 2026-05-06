@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/cocoonstack/epoch/manifest"
+	"github.com/cocoonstack/epoch/utils"
 )
 
 // fakeUploader records every blob and manifest write so tests can assert
@@ -487,5 +488,71 @@ func TestPushRequiresName(t *testing.T) {
 	_, err := pusher.Push(t.Context(), PushOptions{})
 	if err == nil {
 		t.Fatal("expected error when name is empty")
+	}
+}
+
+// Highly fragmented snapshots can produce a config blob with multi-hundred-KB
+// per-file sparse maps; total config size of 1.4 MB is realistic. The previous
+// 1 MiB LimitReader truncated the JSON and surfaced as
+// "parse snapshot config: unexpected end of JSON input" during wake.
+func TestFetchSnapshotConfigOverOneMiB(t *testing.T) {
+	uploader := newFakeUploader()
+
+	// Build a real ~1.4 MB SnapshotConfig — two sparse maps that mirror the
+	// Windows hibernate case (memory-ranges + overlay.qcow2).
+	mkMap := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = `{"o":1234567890,"l":4096}`
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	cfg := manifest.SnapshotConfig{
+		SchemaVersion: "v1",
+		SnapshotID:    "01J0",
+		Hypervisor:    "cloud-hypervisor",
+		Files: map[string]manifest.SnapshotFile{
+			"memory-ranges": {Mode: 0o644, SparseMap: mkMap(25_000), SparseSize: 1 << 32},
+			"overlay.qcow2": {Mode: 0o644, SparseMap: mkMap(25_000), SparseSize: 1 << 33},
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) <= 1<<20 {
+		t.Fatalf("test setup: config %d bytes is not over the old 1 MiB cap", len(data))
+	}
+
+	digest := "sha256:" + utils.SHA256Hex(data)
+	uploader.blobs[digest] = data
+	desc := manifest.Descriptor{
+		MediaType: manifest.MediaTypeSnapshotConfig,
+		Digest:    digest,
+		Size:      int64(len(data)),
+	}
+
+	got, err := FetchSnapshotConfig(t.Context(), uploader, "vm-x", desc)
+	if err != nil {
+		t.Fatalf("FetchSnapshotConfig: %v", err)
+	}
+	if got.SnapshotID != cfg.SnapshotID {
+		t.Errorf("SnapshotID = %q, want %q", got.SnapshotID, cfg.SnapshotID)
+	}
+	if len(got.Files) != 2 {
+		t.Errorf("Files count = %d, want 2", len(got.Files))
+	}
+}
+
+func TestFetchSnapshotConfigRejectsOversizeDescriptor(t *testing.T) {
+	uploader := newFakeUploader()
+	desc := manifest.Descriptor{
+		MediaType: manifest.MediaTypeSnapshotConfig,
+		Digest:    "sha256:00",
+		Size:      maxSnapshotConfigSize + 1,
+	}
+	_, err := FetchSnapshotConfig(t.Context(), uploader, "vm-x", desc)
+	if err == nil || !strings.Contains(err.Error(), "config blob too large") {
+		t.Fatalf("err = %v, want 'config blob too large' substring", err)
 	}
 }

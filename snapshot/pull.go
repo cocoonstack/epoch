@@ -146,19 +146,35 @@ func StreamParsed(ctx context.Context, m *manifest.OCIManifest, dl Downloader, o
 	return writeImportTar(ctx, dl, opts.Name, localName, cfg, m.Layers, opts.Writer, opts.Progress)
 }
 
+// maxSnapshotConfigSize bounds the config blob read to defend against a
+// pathological / malicious manifest pointing at an arbitrarily large blob.
+// The previous 1 MiB cap was too tight: the config carries per-file sparse
+// segment maps (memory-ranges, overlay.qcow2), and a single fragmented file
+// can contribute several hundred KB of map JSON on its own. A 4 GiB Windows
+// VM with a Firebase-active agent has been observed at ~1.4 MB total config
+// (memory-ranges 580 KB + overlay.qcow2 612 KB + base fields). 64 MiB leaves
+// headroom for genuinely fragmented snapshots without losing the safety net.
+const maxSnapshotConfigSize = 64 << 20
+
 // FetchSnapshotConfig downloads and parses the snapshot config blob.
 func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc manifest.Descriptor) (*manifest.SnapshotConfig, error) {
 	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
 		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
+	}
+	if desc.Size > maxSnapshotConfigSize {
+		return nil, fmt.Errorf("config blob too large: %d > %d", desc.Size, maxSnapshotConfigSize)
 	}
 	body, err := dl.GetBlob(ctx, name, desc.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("get config blob %s: %w", desc.Digest, err)
 	}
 	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, 1<<20)) // config blob is tiny
+	data, err := io.ReadAll(io.LimitReader(body, maxSnapshotConfigSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read config blob: %w", err)
+	}
+	if int64(len(data)) > maxSnapshotConfigSize {
+		return nil, fmt.Errorf("config blob exceeded cap %d while streaming", maxSnapshotConfigSize)
 	}
 	var cfg manifest.SnapshotConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
