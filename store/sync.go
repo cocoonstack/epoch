@@ -59,13 +59,6 @@ func (s *Store) SyncFromCatalog(ctx context.Context, reg *registry.Registry) err
 	return nil
 }
 
-type pendingTag struct {
-	repoName    string
-	tag         Tag
-	descriptors []manifest.Descriptor
-	needsCommit bool
-}
-
 func (s *Store) prepareSync(ctx context.Context, cat *manifest.Catalog, reg *registry.Registry) ([]pendingTag, bool, error) {
 	var pending []pendingTag
 	degraded := false
@@ -173,95 +166,6 @@ func (s *Store) commitSync(ctx context.Context, pending []pendingTag) error {
 	return nil
 }
 
-// tagAggregates returns totals for a manifest; for indexes, dedupes across platforms.
-func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind) (int64, int, []manifest.Descriptor, PlatformSizes) {
-	if kind == manifest.KindImageIndex {
-		return expandIndexAggregates(ctx, reg, repoName, m)
-	}
-	totalSize := m.Config.Size
-	for _, layer := range m.Layers {
-		totalSize += layer.Size
-	}
-	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
-	return totalSize, len(m.Layers), descriptors, nil
-}
-
-func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest) (int64, int, []manifest.Descriptor, PlatformSizes) {
-	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests)
-
-	seen := make(map[string]bool)
-	var totalSize int64
-	descriptors := make([]manifest.Descriptor, 0, 4*len(m.Manifests))
-	platformSizes := make(PlatformSizes, 0, len(m.Manifests))
-
-	for _, f := range fetched {
-		if f == nil {
-			continue
-		}
-		childSize := f.parsed.Config.Size
-		for _, l := range f.parsed.Layers {
-			childSize += l.Size
-		}
-		platformSizes = append(platformSizes, PlatformSize{
-			Digest:     f.digest,
-			Size:       childSize,
-			LayerCount: len(f.parsed.Layers),
-		})
-
-		for _, d := range slices.Concat([]manifest.Descriptor{f.parsed.Config}, f.parsed.Layers) {
-			if d.Digest == "" || seen[d.Digest] {
-				continue
-			}
-			seen[d.Digest] = true
-			totalSize += d.Size
-			descriptors = append(descriptors, d)
-		}
-	}
-	return totalSize, len(m.Manifests), descriptors, platformSizes
-}
-
-type fetchedChild struct {
-	digest string
-	parsed *manifest.OCIManifest
-}
-
-func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest) []*fetchedChild {
-	results := make([]*fetchedChild, len(children))
-	if len(children) == 0 {
-		return results
-	}
-
-	logger := log.WithFunc("store.fetchIndexChildren")
-	sem := make(chan struct{}, indexFetchConcurrency)
-	var wg sync.WaitGroup
-	for i, child := range children {
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			raw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
-			if err != nil {
-				logger.Errorf(ctx, err, "fetch index child %s@%s", repoName, child.Digest)
-				return
-			}
-			parsed, err := manifest.Parse(raw)
-			if err != nil {
-				logger.Errorf(ctx, err, "parse index child %s@%s", repoName, child.Digest)
-				return
-			}
-			results[i] = &fetchedChild{digest: child.Digest, parsed: parsed}
-		})
-	}
-	wg.Wait()
-	return results
-}
-
-type tagSyncState struct {
-	digest           string
-	kind             string
-	hasPlatformSizes bool
-}
-
 func (s *Store) getTagSyncState(ctx context.Context, repoName, tagName string) (tagSyncState, error) {
 	var st tagSyncState
 	err := s.db.QueryRowContext(
@@ -273,66 +177,6 @@ func (s *Store) getTagSyncState(ctx context.Context, repoName, tagName string) (
 		repoName, tagName,
 	).Scan(&st.digest, &st.kind, &st.hasPlatformSizes)
 	return st, err
-}
-
-func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
-	result, err := tx.ExecContext(ctx,
-		`INSERT INTO repositories (name) VALUES (?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), updated_at=NOW()`, name)
-	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO tags (repository_id, name, digest, artifact_type, kind, manifest_json, total_size, layer_count, platform_sizes, pushed_at, synced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-		ON DUPLICATE KEY UPDATE
-			digest=VALUES(digest), artifact_type=VALUES(artifact_type), kind=VALUES(kind),
-			manifest_json=VALUES(manifest_json),
-			total_size=VALUES(total_size), layer_count=VALUES(layer_count),
-			platform_sizes=VALUES(platform_sizes),
-			pushed_at=VALUES(pushed_at), synced_at=NOW()`,
-		repoID, t.Name, t.Digest, t.ArtifactType, t.Kind, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PlatformSizes, t.PushedAt)
-	return err
-}
-
-func manifestPushedAt(m *manifest.OCIManifest) time.Time {
-	if v, ok := m.Annotations[manifest.AnnotationCreated]; ok {
-		if ts, err := time.Parse(time.RFC3339, v); err == nil {
-			return ts
-		}
-	}
-	return time.Now().UTC()
-}
-
-type blobAggregate struct {
-	size      int64
-	mediaType string
-	refCount  int
-}
-
-// aggregateBlobs collapses descriptors from all pending tags into one row per
-// digest, counting how many tags reference each blob.
-func aggregateBlobs(pending []pendingTag) map[string]blobAggregate {
-	out := make(map[string]blobAggregate)
-	for _, p := range pending {
-		seen := make(map[string]bool, len(p.descriptors))
-		for _, d := range p.descriptors {
-			if d.Digest == "" || seen[d.Digest] {
-				continue
-			}
-			seen[d.Digest] = true
-			key := strings.TrimPrefix(d.Digest, "sha256:")
-			agg := out[key]
-			agg.size = d.Size
-			agg.mediaType = d.MediaType
-			agg.refCount++
-			out[key] = agg
-		}
-	}
-	return out
 }
 
 // reconcileBlobs rewrites the blobs table to match the authoritative set
@@ -361,37 +205,6 @@ func (s *Store) reconcileBlobs(ctx context.Context, pending []pendingTag) {
 	if err := tx.Commit(); err != nil {
 		logger.Error(ctx, err, "commit reconcile")
 	}
-}
-
-func bulkInsertBlobsTx(ctx context.Context, tx *sql.Tx, aggregates map[string]blobAggregate) error {
-	if len(aggregates) == 0 {
-		return nil
-	}
-	const batchSize = 500
-	type row struct {
-		digest string
-		agg    blobAggregate
-	}
-	rows := make([]row, 0, len(aggregates))
-	for digest, agg := range aggregates {
-		rows = append(rows, row{digest: digest, agg: agg})
-	}
-	for batch := range slices.Chunk(rows, batchSize) {
-		var sb strings.Builder
-		sb.WriteString(`INSERT INTO blobs (digest, size, media_type, ref_count) VALUES `)
-		args := make([]any, 0, len(batch)*4)
-		for j, r := range batch {
-			if j > 0 {
-				sb.WriteString(",")
-			}
-			sb.WriteString("(?,?,?,?)")
-			args = append(args, r.digest, r.agg.size, r.agg.mediaType, r.agg.refCount)
-		}
-		if _, err := tx.ExecContext(ctx, sb.String(), args...); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
@@ -448,4 +261,191 @@ func (s *Store) cleanOrphans(ctx context.Context, cat *manifest.Catalog) {
 			}
 		}
 	}
+}
+
+type pendingTag struct {
+	repoName    string
+	tag         Tag
+	descriptors []manifest.Descriptor
+	needsCommit bool
+}
+
+type tagSyncState struct {
+	digest           string
+	kind             string
+	hasPlatformSizes bool
+}
+
+type fetchedChild struct {
+	digest string
+	parsed *manifest.OCIManifest
+}
+
+type blobAggregate struct {
+	size      int64
+	mediaType string
+	refCount  int
+}
+
+// tagAggregates returns totals for a manifest; for indexes, dedupes across platforms.
+func tagAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest, kind manifest.Kind) (int64, int, []manifest.Descriptor, PlatformSizes) {
+	if kind == manifest.KindImageIndex {
+		return expandIndexAggregates(ctx, reg, repoName, m)
+	}
+	totalSize := m.Config.Size
+	for _, layer := range m.Layers {
+		totalSize += layer.Size
+	}
+	descriptors := slices.Concat([]manifest.Descriptor{m.Config}, m.Layers)
+	return totalSize, len(m.Layers), descriptors, nil
+}
+
+func expandIndexAggregates(ctx context.Context, reg *registry.Registry, repoName string, m *manifest.OCIManifest) (int64, int, []manifest.Descriptor, PlatformSizes) {
+	fetched := fetchIndexChildren(ctx, reg, repoName, m.Manifests)
+
+	seen := make(map[string]bool)
+	var totalSize int64
+	descriptors := make([]manifest.Descriptor, 0, 4*len(m.Manifests))
+	platformSizes := make(PlatformSizes, 0, len(m.Manifests))
+
+	for _, f := range fetched {
+		if f == nil {
+			continue
+		}
+		childSize := f.parsed.Config.Size
+		for _, l := range f.parsed.Layers {
+			childSize += l.Size
+		}
+		platformSizes = append(platformSizes, PlatformSize{
+			Digest:     f.digest,
+			Size:       childSize,
+			LayerCount: len(f.parsed.Layers),
+		})
+
+		for _, d := range slices.Concat([]manifest.Descriptor{f.parsed.Config}, f.parsed.Layers) {
+			if d.Digest == "" || seen[d.Digest] {
+				continue
+			}
+			seen[d.Digest] = true
+			totalSize += d.Size
+			descriptors = append(descriptors, d)
+		}
+	}
+	return totalSize, len(m.Manifests), descriptors, platformSizes
+}
+
+func fetchIndexChildren(ctx context.Context, reg *registry.Registry, repoName string, children []manifest.IndexManifest) []*fetchedChild {
+	results := make([]*fetchedChild, len(children))
+	if len(children) == 0 {
+		return results
+	}
+
+	logger := log.WithFunc("store.fetchIndexChildren")
+	sem := make(chan struct{}, indexFetchConcurrency)
+	var wg sync.WaitGroup
+	for i, child := range children {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			raw, err := reg.ManifestJSONByDigest(ctx, repoName, child.Digest)
+			if err != nil {
+				logger.Errorf(ctx, err, "fetch index child %s@%s", repoName, child.Digest)
+				return
+			}
+			parsed, err := manifest.Parse(raw)
+			if err != nil {
+				logger.Errorf(ctx, err, "parse index child %s@%s", repoName, child.Digest)
+				return
+			}
+			results[i] = &fetchedChild{digest: child.Digest, parsed: parsed}
+		})
+	}
+	wg.Wait()
+	return results
+}
+
+func upsertRepositoryTx(ctx context.Context, tx *sql.Tx, name string) (int64, error) {
+	result, err := tx.ExecContext(ctx,
+		`INSERT INTO repositories (name) VALUES (?) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), updated_at=NOW()`, name)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func upsertTagTx(ctx context.Context, tx *sql.Tx, repoID int64, t Tag) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO tags (repository_id, name, digest, artifact_type, kind, manifest_json, total_size, layer_count, platform_sizes, pushed_at, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+		ON DUPLICATE KEY UPDATE
+			digest=VALUES(digest), artifact_type=VALUES(artifact_type), kind=VALUES(kind),
+			manifest_json=VALUES(manifest_json),
+			total_size=VALUES(total_size), layer_count=VALUES(layer_count),
+			platform_sizes=VALUES(platform_sizes),
+			pushed_at=VALUES(pushed_at), synced_at=NOW()`,
+		repoID, t.Name, t.Digest, t.ArtifactType, t.Kind, t.ManifestJSON, t.TotalSize, t.LayerCount, t.PlatformSizes, t.PushedAt)
+	return err
+}
+
+func manifestPushedAt(m *manifest.OCIManifest) time.Time {
+	if v, ok := m.Annotations[manifest.AnnotationCreated]; ok {
+		if ts, err := time.Parse(time.RFC3339, v); err == nil {
+			return ts
+		}
+	}
+	return time.Now().UTC()
+}
+
+// aggregateBlobs collapses descriptors from all pending tags into one row per
+// digest, counting how many tags reference each blob.
+func aggregateBlobs(pending []pendingTag) map[string]blobAggregate {
+	out := make(map[string]blobAggregate)
+	for _, p := range pending {
+		seen := make(map[string]bool, len(p.descriptors))
+		for _, d := range p.descriptors {
+			if d.Digest == "" || seen[d.Digest] {
+				continue
+			}
+			seen[d.Digest] = true
+			key := strings.TrimPrefix(d.Digest, "sha256:")
+			agg := out[key]
+			agg.size = d.Size
+			agg.mediaType = d.MediaType
+			agg.refCount++
+			out[key] = agg
+		}
+	}
+	return out
+}
+
+func bulkInsertBlobsTx(ctx context.Context, tx *sql.Tx, aggregates map[string]blobAggregate) error {
+	if len(aggregates) == 0 {
+		return nil
+	}
+	const batchSize = 500
+	type row struct {
+		digest string
+		agg    blobAggregate
+	}
+	rows := make([]row, 0, len(aggregates))
+	for digest, agg := range aggregates {
+		rows = append(rows, row{digest: digest, agg: agg})
+	}
+	for batch := range slices.Chunk(rows, batchSize) {
+		var sb strings.Builder
+		sb.WriteString(`INSERT INTO blobs (digest, size, media_type, ref_count) VALUES `)
+		args := make([]any, 0, len(batch)*4)
+		for j, r := range batch {
+			if j > 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("(?,?,?,?)")
+			args = append(args, r.digest, r.agg.size, r.agg.mediaType, r.agg.refCount)
+		}
+		if _, err := tx.ExecContext(ctx, sb.String(), args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
