@@ -26,6 +26,8 @@ var (
 	errMissingSnapshotJSON = errors.New("snapshot.json not found in export stream")
 
 	nowFunc = time.Now // tests override
+
+	_ CocoonRunner = (*ExecCocoon)(nil)
 )
 
 // Uploader abstracts OCI blob and manifest uploads.
@@ -57,19 +59,6 @@ type ImportOptions struct {
 type ExecCocoon struct {
 	Binary string
 	Stderr io.Writer
-}
-
-// ResolveCocoonBinary finds the cocoon binary on PATH.
-func ResolveCocoonBinary(envValue string) (string, error) {
-	bin := strings.TrimSpace(envValue)
-	if bin == "" {
-		bin = "cocoon"
-	}
-	resolved, err := exec.LookPath(bin)
-	if err != nil {
-		return "", fmt.Errorf("locate cocoon binary %q: %w", bin, err)
-	}
-	return resolved, nil
 }
 
 // Export streams a snapshot out of cocoon via `cocoon snapshot export`.
@@ -132,6 +121,19 @@ func (e *ExecCocoon) stderr() io.Writer {
 		return io.Discard
 	}
 	return e.Stderr
+}
+
+// ResolveCocoonBinary finds the cocoon binary on PATH.
+func ResolveCocoonBinary(envValue string) (string, error) {
+	bin := strings.TrimSpace(envValue)
+	if bin == "" {
+		bin = "cocoon"
+	}
+	resolved, err := exec.LookPath(bin)
+	if err != nil {
+		return "", fmt.Errorf("locate cocoon binary %q: %w", bin, err)
+	}
+	return resolved, nil
 }
 
 type snapshotExportEnvelope struct {

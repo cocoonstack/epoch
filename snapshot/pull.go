@@ -35,6 +35,14 @@ type PullOptions struct {
 	Progress    func(string)
 }
 
+// StreamOptions configures snapshot tar stream assembly.
+type StreamOptions struct {
+	Name      string
+	LocalName string // empty = use Name
+	Writer    io.Writer
+	Progress  func(string)
+}
+
 // Pull downloads a snapshot artifact and feeds it to `cocoon snapshot import`.
 func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 	if opts.Name == "" {
@@ -79,14 +87,6 @@ func (p *Puller) Pull(ctx context.Context, opts PullOptions) error {
 		return fmt.Errorf("cocoon snapshot import: %w", waitErr)
 	}
 	return nil
-}
-
-// StreamOptions configures snapshot tar stream assembly.
-type StreamOptions struct {
-	Name      string
-	LocalName string // empty = use Name
-	Writer    io.Writer
-	Progress  func(string)
 }
 
 // Stream reassembles a snapshot manifest into a cocoon-import tar stream.
