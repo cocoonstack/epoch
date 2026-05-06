@@ -106,25 +106,6 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	})
 }
 
-func resolveUploadDir(ctx context.Context) string {
-	logger := log.WithFunc("server.resolveUploadDir")
-	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
-	for _, dir := range candidates {
-		if dir == "" {
-			continue
-		}
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			logger.Warnf(ctx, "upload spool dir %q not usable, trying next: %v", dir, err)
-			continue
-		}
-		logger.Infof(ctx, "upload spool dir: %s", dir)
-		return dir
-	}
-	fallback := os.TempDir()
-	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
-	return fallback
-}
-
 func (s *Server) setupRoutes(ctx context.Context) {
 	v2 := s.router.PathPrefix("/v2").Subrouter()
 	v2.StrictSlash(true)
@@ -181,15 +162,6 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	s.router.PathPrefix("/").Handler(s.uiHandler).Methods(http.MethodGet)
 }
 
-func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {
-	srv := commonhttpx.NewServer(addr, handler)
-	srv.IdleTimeout = 60 * time.Second
-	srv.BaseContext = func(net.Listener) context.Context {
-		return ctx
-	}
-	return srv
-}
-
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	logger := log.WithFunc("server.withLogging")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +194,34 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func resolveUploadDir(ctx context.Context) string {
+	logger := log.WithFunc("server.resolveUploadDir")
+	candidates := []string{os.Getenv("EPOCH_UPLOAD_DIR"), defaultUploadSpoolDir}
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			logger.Warnf(ctx, "upload spool dir %q not usable, trying next: %v", dir, err)
+			continue
+		}
+		logger.Infof(ctx, "upload spool dir: %s", dir)
+		return dir
+	}
+	fallback := os.TempDir()
+	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
+	return fallback
+}
+
+func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {
+	srv := commonhttpx.NewServer(addr, handler)
+	srv.IdleTimeout = 60 * time.Second
+	srv.BaseContext = func(net.Listener) context.Context {
+		return ctx
+	}
+	return srv
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
