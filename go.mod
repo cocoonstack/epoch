@@ -1,10 +1,10 @@
 module github.com/cocoonstack/epoch
 
-go 1.25.0
+go 1.25.6
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/cocoonstack/cocoon-common v0.1.10-0.20260423175920-c8cd308978cb
+	github.com/cocoonstack/cocoon-common v0.2.1-0.20260506143712-eaa6e94cf830
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1

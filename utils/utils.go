@@ -1,3 +1,4 @@
+// Package utils provides shared epoch helper functions.
 package utils
 
 import (

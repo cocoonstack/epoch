@@ -1,3 +1,4 @@
+// Package cmd wires epoch cobra commands.
 package cmd
 
 import (

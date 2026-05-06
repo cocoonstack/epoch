@@ -1,3 +1,6 @@
+// Package main is the epoch entry point. epoch is the cocoon snapshot /
+// cloudimg registry: it speaks OCI Distribution v2 and serves a control
+// plane API plus a small UI.
 package main
 
 import (
