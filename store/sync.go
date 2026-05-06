@@ -264,7 +264,8 @@ type tagSyncState struct {
 
 func (s *Store) getTagSyncState(ctx context.Context, repoName, tagName string) (tagSyncState, error) {
 	var st tagSyncState
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		`SELECT t.digest, t.kind, t.platform_sizes IS NOT NULL
 		 FROM tags t
 		 JOIN repositories r ON r.id = t.repository_id

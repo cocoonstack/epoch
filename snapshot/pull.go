@@ -17,6 +17,9 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// Real configs hit ~1.4 MB on fragmented Windows VMs; 64 MiB leaves headroom while bounding pathological reads.
+const maxSnapshotConfigSize = 64 << 20
+
 // Puller downloads snapshot artifacts and pipes them into cocoon snapshot import.
 type Puller struct {
 	Downloader Downloader
@@ -151,14 +154,20 @@ func FetchSnapshotConfig(ctx context.Context, dl Downloader, name string, desc m
 	if desc.MediaType != manifest.MediaTypeSnapshotConfig {
 		return nil, fmt.Errorf("unexpected config mediaType %q", desc.MediaType)
 	}
+	if desc.Size > maxSnapshotConfigSize {
+		return nil, fmt.Errorf("config blob too large: %d > %d", desc.Size, maxSnapshotConfigSize)
+	}
 	body, err := dl.GetBlob(ctx, name, desc.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("get config blob %s: %w", desc.Digest, err)
 	}
 	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, 1<<20)) // config blob is tiny
+	data, err := io.ReadAll(io.LimitReader(body, maxSnapshotConfigSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read config blob: %w", err)
+	}
+	if int64(len(data)) > maxSnapshotConfigSize {
+		return nil, fmt.Errorf("config blob exceeded cap %d while streaming", maxSnapshotConfigSize)
 	}
 	var cfg manifest.SnapshotConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
