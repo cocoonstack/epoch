@@ -89,25 +89,51 @@ type manifestStreamer interface {
 }
 
 func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest) {
-	logger := log.WithFunc("server.streamCloudImage")
-	w.Header().Set("Content-Type", manifest.MediaTypeGeneric)
-	w.WriteHeader(http.StatusOK)
-
-	if streamErr := cloudimg.StreamParsed(r.Context(), m, &registryBlobReader{reg: s.reg}, w); streamErr != nil {
-		logger.Errorf(r.Context(), streamErr, "stream cloud image %s", name)
-	}
+	streamWithPreflight(r.Context(), w, manifest.MediaTypeGeneric,
+		func(out io.Writer) error {
+			return cloudimg.StreamParsed(r.Context(), m, &registryBlobReader{reg: s.reg}, out)
+		},
+		"stream cloud image", name)
 }
 
 func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest) {
-	logger := log.WithFunc("server.streamSnapshot")
-	w.Header().Set("Content-Type", manifest.MediaTypeTar)
-	w.WriteHeader(http.StatusOK)
-
 	dl := &registryDownloader{reg: s.reg, manifestRaw: raw, manifestName: name}
-	if streamErr := snapshot.StreamParsed(r.Context(), m, dl, snapshot.StreamOptions{
-		Name:   name,
-		Writer: w,
-	}); streamErr != nil {
-		logger.Errorf(r.Context(), streamErr, "stream snapshot %s", name)
+	streamWithPreflight(r.Context(), w, manifest.MediaTypeTar,
+		func(out io.Writer) error {
+			return snapshot.StreamParsed(r.Context(), m, dl, snapshot.StreamOptions{Name: name, Writer: out})
+		},
+		"stream snapshot", name)
+}
+
+// streamWithPreflight runs streamFn against an io.Pipe so a fetch error
+// before the first byte surfaces as 500 instead of a truncated 200. Once
+// the first byte arrives we commit to 200 and copy the rest. Mid-stream
+// failures after WriteHeader still degrade to a truncated 200 — that's
+// the standard HTTP semantics for chunked downloads.
+func streamWithPreflight(ctx context.Context, w http.ResponseWriter, contentType string, streamFn func(io.Writer) error, errCtx, name string) {
+	logger := log.WithFunc("server.streamWithPreflight")
+	pr, pw := io.Pipe()
+	go func() {
+		err := streamFn(pw)
+		_ = pw.CloseWithError(err)
+	}()
+
+	var first [1]byte
+	n, err := io.ReadFull(pr, first[:])
+	if err != nil || n == 0 {
+		logger.Errorf(ctx, err, "%s %s (preflight)", errCtx, name)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		_ = pr.Close()
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	if _, writeErr := w.Write(first[:n]); writeErr != nil {
+		_ = pr.Close()
+		return
+	}
+	if _, copyErr := io.Copy(w, pr); copyErr != nil {
+		logger.Errorf(ctx, copyErr, "%s %s (mid-stream)", errCtx, name)
 	}
 }
