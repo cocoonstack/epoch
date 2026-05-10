@@ -105,11 +105,9 @@ func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name str
 		"stream snapshot", name)
 }
 
-// streamWithPreflight runs streamFn against an io.Pipe so a fetch error
-// before the first byte surfaces as 500 instead of a truncated 200. Once
-// the first byte arrives we commit to 200 and copy the rest. Mid-stream
-// failures after WriteHeader still degrade to a truncated 200 — that's
-// the standard HTTP semantics for chunked downloads.
+// streamWithPreflight blocks on the first byte from streamFn so fetch
+// errors before any output surface as 500. Mid-stream failures after
+// WriteHeader still degrade to truncated 200 (chunked semantics).
 func streamWithPreflight(ctx context.Context, w http.ResponseWriter, contentType string, streamFn func(io.Writer) error, errCtx, name string) {
 	logger := log.WithFunc("server.streamWithPreflight")
 	pr, pw := io.Pipe()
