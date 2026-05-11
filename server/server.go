@@ -142,6 +142,7 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	api.HandleFunc("/repositories/{name:.+}/tags", s.apiListTags).Methods(http.MethodGet)
 	api.HandleFunc("/repositories/{name:.+}", s.apiGetRepository).Methods(http.MethodGet)
 
+	s.router.HandleFunc("/dl/{name:.+}/{ref}", s.handleArtifactDownload).Methods(http.MethodGet)
 	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 
 	s.router.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
