@@ -45,15 +45,9 @@ func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.
 }
 
 // handleArtifactDownload streams a cloud image or snapshot. Auth-exempt.
-//
-// Canonical URL: /dl/{name}/{ref} — ref is a tag ("latest", "22h2-20260510")
-// or a digest reference ("sha256:..."). The route also matches /dl/{name}
-// (no ref); in that case ref defaults to "latest". Both routes funnel here.
-//
-// Backward-compat fallback: if the (name, ref) lookup 404s, retry as
-// (name+"/"+ref, "latest"). That covers the pre-2026-05 2-segment form
-// `/dl/simular/win11`, which the new route would split as name=simular,
-// ref=win11 — the fallback re-joins to name=simular/win11 + implicit latest.
+// On 404 retries (name+"/"+ref, "latest") to keep the pre-2026-05
+// /dl/{name-with-slash} form working under the new /dl/{name}/{ref} route,
+// flagging the response with a Deprecation header so callers migrate.
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	ref := urlVar(r, "ref")
@@ -73,11 +67,9 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if useName != name || useRef != ref {
-		// Surface that the legacy form resolved via fallback so callers can
-		// migrate. The Deprecation header follows the IETF draft convention.
 		w.Header().Set("Deprecation", "true")
 		w.Header().Set("Link", `</dl/`+useName+`/`+useRef+`>; rel="successor-version"`)
-		logger.Warnf(r.Context(), "legacy /dl/ form %s:%s resolved via fallback to %s:%s — caller should migrate to /dl/%s/%s", name, ref, useName, useRef, useName, useRef)
+		logger.Warnf(r.Context(), "legacy /dl/ form %s:%s resolved via fallback to %s:%s", name, ref, useName, useRef)
 	}
 
 	m, err := manifest.Parse(raw)
@@ -99,9 +91,8 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// fetchManifestWithLegacyFallback tries (name, ref) first; on 404 retries
-// (name+"/"+ref, "latest"). Returns the (name, ref) pair that resolved so
-// the caller can flag deprecation. Non-404 errors short-circuit immediately.
+// fetchManifestWithLegacyFallback returns the resolved (name, ref) so the
+// caller can detect when the fallback path fired.
 func (s *Server) fetchManifestWithLegacyFallback(r *http.Request, name, ref string) ([]byte, string, string, error) {
 	raw, err := s.loadManifestRaw(r, name, ref)
 	if err == nil {

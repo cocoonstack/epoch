@@ -142,11 +142,6 @@ func (s *Server) setupRoutes(ctx context.Context) {
 	api.HandleFunc("/repositories/{name:.+}/tags", s.apiListTags).Methods(http.MethodGet)
 	api.HandleFunc("/repositories/{name:.+}", s.apiGetRepository).Methods(http.MethodGet)
 
-	// /dl/{name}/{ref} is the canonical form — ref is a tag (e.g. "latest",
-	// "22h2-20260510") or a digest reference ("sha256:..."). The single-arg
-	// /dl/{name} route is kept as a backward-compat shim that handler-side
-	// retries name+"/"+ref as the repo with implicit latest, covering the
-	// pre-2026-05 form `/dl/simular/win11` (2 segments, name=simular/win11).
 	s.router.HandleFunc("/dl/{name:.+}/{ref}", s.handleArtifactDownload).Methods(http.MethodGet)
 	s.router.HandleFunc("/dl/{name:.+}", s.handleArtifactDownload).Methods(http.MethodGet)
 

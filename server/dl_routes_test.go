@@ -8,11 +8,9 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// TestDLRouteResolution exercises the gorilla/mux route table to confirm
-// that /dl/ URLs split into (name, ref) the way handleArtifactDownload
-// expects. The handler-side fallback for the legacy multi-segment-name
-// form is integration-tested against a live registry; this test only
-// validates the URL parsing, which is the part with routing ambiguity.
+// TestDLRouteResolution verifies /dl/ URLs split into (name, ref) the way
+// handleArtifactDownload expects. The handler-side legacy fallback is
+// integration-tested separately.
 func TestDLRouteResolution(t *testing.T) {
 	tests := []struct {
 		path        string
@@ -64,8 +62,7 @@ func resolveDLRoute(t *testing.T, path string) (name, ref string, matched bool) 
 	return name, ref, matched
 }
 
-// TestDLPublicPathPostMigration ensures the new /dl/{name}/{ref} URLs
-// still bypass auth.
+// TestDLPublicPathPostMigration ensures /dl/{name}/{ref} bypasses auth.
 func TestDLPublicPathPostMigration(t *testing.T) {
 	paths := []string{
 		"/dl/win11/latest",
