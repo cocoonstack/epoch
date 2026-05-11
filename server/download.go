@@ -44,39 +44,78 @@ func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.
 	return body, err
 }
 
-// handleArtifactDownload streams a cloud image or snapshot by name. Auth-exempt.
+// handleArtifactDownload streams a cloud image or snapshot. Auth-exempt.
+//
+// Canonical URL: /dl/{name}/{ref} — ref is a tag ("latest", "22h2-20260510")
+// or a digest reference ("sha256:..."). The route also matches /dl/{name}
+// (no ref); in that case ref defaults to "latest". Both routes funnel here.
+//
+// Backward-compat fallback: if the (name, ref) lookup 404s, retry as
+// (name+"/"+ref, "latest"). That covers the pre-2026-05 2-segment form
+// `/dl/simular/win11`, which the new route would split as name=simular,
+// ref=win11 — the fallback re-joins to name=simular/win11 + implicit latest.
 func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
+	ref := urlVar(r, "ref")
+	if ref == "" {
+		ref = "latest"
+	}
 	logger := log.WithFunc("server.handleArtifactDownload")
 
-	raw, err := s.reg.ManifestJSON(r.Context(), name, "latest")
+	raw, useName, useRef, err := s.fetchManifestWithLegacyFallback(r, name, ref)
 	if err != nil {
 		if isNotFound(err) {
 			http.Error(w, "artifact not found", http.StatusNotFound)
 			return
 		}
-		logger.Errorf(r.Context(), err, "fetch manifest %s", name)
+		logger.Errorf(r.Context(), err, "fetch manifest %s:%s", name, ref)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	if useName != name || useRef != ref {
+		// Surface that the legacy form resolved via fallback so callers can
+		// migrate. The Deprecation header follows the IETF draft convention.
+		w.Header().Set("Deprecation", "true")
+		w.Header().Set("Link", `</dl/`+useName+`/`+useRef+`>; rel="successor-version"`)
+		logger.Warnf(r.Context(), "legacy /dl/ form %s:%s resolved via fallback to %s:%s — caller should migrate to /dl/%s/%s", name, ref, useName, useRef, useName, useRef)
 	}
 
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		logger.Errorf(r.Context(), err, "parse manifest %s", name)
+		logger.Errorf(r.Context(), err, "parse manifest %s:%s", useName, useRef)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	switch manifest.ClassifyParsed(m) {
 	case manifest.KindCloudImage:
-		s.streamCloudImage(w, r, name, m)
+		s.streamCloudImage(w, r, useName, m)
 	case manifest.KindSnapshot:
-		s.streamSnapshot(w, r, name, raw, m)
+		s.streamSnapshot(w, r, useName, raw, m)
 	case manifest.KindContainerImage:
 		http.Error(w, "container image — pull via OCI client (oras / crane / docker)", http.StatusMethodNotAllowed)
 	default:
 		http.Error(w, "unknown artifact kind", http.StatusMethodNotAllowed)
 	}
+}
+
+// fetchManifestWithLegacyFallback tries (name, ref) first; on 404 retries
+// (name+"/"+ref, "latest"). Returns the (name, ref) pair that resolved so
+// the caller can flag deprecation. Non-404 errors short-circuit immediately.
+func (s *Server) fetchManifestWithLegacyFallback(r *http.Request, name, ref string) ([]byte, string, string, error) {
+	raw, err := s.loadManifestRaw(r, name, ref)
+	if err == nil {
+		return raw, name, ref, nil
+	}
+	if !isNotFound(err) {
+		return nil, name, ref, err
+	}
+	legacyName := name + "/" + ref
+	legacy, lerr := s.loadManifestRaw(r, legacyName, "latest")
+	if lerr != nil {
+		return nil, name, ref, err
+	}
+	return legacy, legacyName, "latest", nil
 }
 
 type blobStreamer interface {
