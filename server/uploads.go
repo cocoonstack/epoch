@@ -139,7 +139,12 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	if sess.poisoned {
+	// Re-check TTL under sess.mu: a concurrent evictExpired may have
+	// removed this session from the map between our lookup and lock
+	// acquisition. Without this guard, the Append would return success
+	// for bytes that are immediately discarded when eviction proceeds to
+	// close the tempfile.
+	if sess.poisoned || u.now().Sub(sess.createdAt) > u.ttl {
 		return sess.size, errUploadNotFound
 	}
 
