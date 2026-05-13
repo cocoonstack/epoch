@@ -94,6 +94,7 @@ func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON stri
 func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
+	logger := log.WithFunc("server.apiDeleteTag")
 
 	// The control-plane API is tag-only. A sha256-prefixed ref would
 	// otherwise be passed straight to DeleteManifest as a tag name and
@@ -111,7 +112,12 @@ func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = s.store.DeleteTag(r.Context(), name, tag)
+	// Object store is the source of truth; a stale row in MySQL is
+	// repaired by SyncFromCatalog. Surface the failure so the operator
+	// can investigate persistent drift instead of swallowing it.
+	if err := s.store.DeleteTag(r.Context(), name, tag); err != nil {
+		logger.Warnf(r.Context(), "store DeleteTag %s:%s failed (manifest already deleted): %v", name, tag, err)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
