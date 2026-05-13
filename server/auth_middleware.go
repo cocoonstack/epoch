@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"slices"
 	"strings"
@@ -118,8 +119,12 @@ func bearerToken(r *http.Request) string {
 
 // isValidToken reports whether candidate is an accepted registry token.
 // It checks the static push token first, then store-managed tokens.
+// The static-token comparison uses constant-time equality so an attacker
+// cannot probe for the token byte-by-byte via timing differences.
 func (s *Server) isValidToken(ctx context.Context, candidate string) bool {
-	if s.registryToken != "" && candidate == s.registryToken {
+	if s.registryToken != "" &&
+		len(candidate) == len(s.registryToken) &&
+		subtle.ConstantTimeCompare([]byte(candidate), []byte(s.registryToken)) == 1 {
 		return true
 	}
 	return s.store != nil && s.store.ValidateToken(ctx, candidate)
