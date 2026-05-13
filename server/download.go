@@ -12,6 +12,8 @@ import (
 	"github.com/cocoonstack/epoch/snapshot"
 )
 
+const defaultTag = "latest"
+
 type registryBlobReader struct {
 	reg blobStreamer
 }
@@ -23,19 +25,38 @@ func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.Re
 }
 
 // registryDownloader adapts *registry.Registry to snapshot.Downloader.
+// The manifest{Name,Tag,Raw} fields form a one-entry cache for the
+// already-fetched parent manifest; the tag is part of the key so
+// image-index child fetches (GetManifest with child.Digest) miss and
+// hit the registry by digest.
 type registryDownloader struct {
 	reg          manifestStreamer
 	manifestName string
+	manifestTag  string
 	manifestRaw  []byte
 }
 
-// GetManifest returns the manifest JSON, using a cached copy when available.
-func (d *registryDownloader) GetManifest(ctx context.Context, name, _ string) ([]byte, string, error) {
-	if name == d.manifestName && d.manifestRaw != nil {
+// GetManifest returns the manifest JSON, using a cached copy when the
+// (name, tag) pair matches what the caller pre-seeded.
+func (d *registryDownloader) GetManifest(ctx context.Context, name, tag string) ([]byte, string, error) {
+	if name == d.manifestName && tag == d.manifestTag && d.manifestRaw != nil {
 		return d.manifestRaw, "", nil
 	}
-	raw, err := d.reg.ManifestJSON(ctx, name, "latest")
+	raw, err := d.fetchManifest(ctx, name, tag)
 	return raw, "", err
+}
+
+// fetchManifest routes sha256:-prefixed tags to ManifestJSONByDigest
+// so image-index child fetches resolve correctly; bare tags fall back
+// to ManifestJSON, defaulting an empty tag to "latest".
+func (d *registryDownloader) fetchManifest(ctx context.Context, name, tag string) ([]byte, error) {
+	if tag == "" {
+		tag = defaultTag
+	}
+	if isDigestRef(tag) {
+		return d.reg.ManifestJSONByDigest(ctx, name, tag)
+	}
+	return d.reg.ManifestJSON(ctx, name, tag)
 }
 
 // GetBlob downloads a blob by digest from the registry object store.
@@ -52,7 +73,7 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 	name := urlVar(r, "name")
 	ref := urlVar(r, "ref")
 	if ref == "" {
-		ref = "latest"
+		ref = defaultTag
 	}
 	logger := log.WithFunc("server.handleArtifactDownload")
 
@@ -83,7 +104,7 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request) 
 	case manifest.KindCloudImage:
 		s.streamCloudImage(w, r, useName, m)
 	case manifest.KindSnapshot:
-		s.streamSnapshot(w, r, useName, raw, m)
+		s.streamSnapshot(w, r, useName, useRef, raw, m)
 	case manifest.KindContainerImage:
 		http.Error(w, "container image — pull via OCI client (oras / crane / docker)", http.StatusMethodNotAllowed)
 	default:
@@ -102,11 +123,11 @@ func (s *Server) fetchManifestWithLegacyFallback(r *http.Request, name, ref stri
 		return nil, name, ref, err
 	}
 	legacyName := name + "/" + ref
-	legacy, lerr := s.loadManifestRaw(r, legacyName, "latest")
+	legacy, lerr := s.loadManifestRaw(r, legacyName, defaultTag)
 	if lerr != nil {
 		return nil, name, ref, err
 	}
-	return legacy, legacyName, "latest", nil
+	return legacy, legacyName, defaultTag, nil
 }
 
 type blobStreamer interface {
@@ -116,6 +137,7 @@ type blobStreamer interface {
 type manifestStreamer interface {
 	blobStreamer
 	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
+	ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error)
 }
 
 func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest) {
@@ -126,8 +148,13 @@ func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name s
 		"stream cloud image", name)
 }
 
-func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name string, raw []byte, m *manifest.OCIManifest) {
-	dl := &registryDownloader{reg: s.reg, manifestRaw: raw, manifestName: name}
+func (s *Server) streamSnapshot(w http.ResponseWriter, r *http.Request, name, tag string, raw []byte, m *manifest.OCIManifest) {
+	dl := &registryDownloader{
+		reg:          s.reg,
+		manifestRaw:  raw,
+		manifestName: name,
+		manifestTag:  tag,
+	}
 	streamWithPreflight(r.Context(), w, manifest.MediaTypeTar,
 		func(out io.Writer) error {
 			return snapshot.StreamParsed(r.Context(), m, dl, snapshot.StreamOptions{Name: name, Writer: out})

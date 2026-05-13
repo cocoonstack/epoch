@@ -38,9 +38,10 @@ Also reports the classified kind (snapshot / cloud-image / container-image / unk
 			if classifyErr != nil {
 				logger.Warnf(ctx, "classify: %v", classifyErr)
 			}
-			logger.Infof(ctx, "kind:        %s", kind)
-			logger.Infof(ctx, "contentType: %s", contentType)
-			logger.Info(ctx, "manifest:")
+			// Banner to stderr keeps stdout pipe-clean for jq/yq/less.
+			fmt.Fprintf(os.Stderr, "kind:        %s\n", kind)
+			fmt.Fprintf(os.Stderr, "contentType: %s\n", contentType)
+			fmt.Fprintln(os.Stderr, "manifest:")
 
 			var pretty bytes.Buffer
 			if indentErr := json.Indent(&pretty, raw, "", "  "); indentErr != nil {

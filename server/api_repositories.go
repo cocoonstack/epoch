@@ -94,12 +94,27 @@ func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON stri
 func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
+	logger := log.WithFunc("server.apiDeleteTag")
+
+	// Control-plane API is tag-only. A sha256-prefixed value would be
+	// looked up as a literal tag name and silently no-op; steer
+	// callers at the v2 delete-by-digest endpoint instead.
+	if isDigestRef(tag) {
+		writeError(w, http.StatusBadRequest,
+			"digest references are not allowed here; use DELETE /v2/{name}/manifests/{digest}")
+		return
+	}
 
 	if err := s.reg.DeleteManifest(r.Context(), name, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = s.store.DeleteTag(r.Context(), name, tag)
+	// Object store is the source of truth; a stale row in MySQL is
+	// repaired by SyncFromCatalog. Surface the failure so the operator
+	// can investigate persistent drift instead of swallowing it.
+	if err := s.store.DeleteTag(r.Context(), name, tag); err != nil {
+		logger.Warnf(r.Context(), "store DeleteTag %s:%s failed (manifest already deleted): %v", name, tag, err)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }

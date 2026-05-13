@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/cocoonstack/cocoon-common/auth"
 )
@@ -21,7 +20,7 @@ func (s *Server) getSession(r *http.Request) *auth.Session {
 		return nil
 	}
 	sess, ok := auth.VerifySession(c.Value, s.sso.CookieSecret)
-	if !ok || sess.Exp < time.Now().Unix() {
+	if !ok {
 		return nil
 	}
 	return sess

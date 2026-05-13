@@ -12,6 +12,9 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+// Fail at build-time on cloudimg.CocoonRunner interface drift.
+var _ cloudimg.CocoonRunner = (*snapshot.ExecCocoon)(nil)
+
 func newPullCmd() *cobra.Command {
 	var (
 		overrideName string

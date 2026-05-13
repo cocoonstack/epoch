@@ -3,6 +3,7 @@ package server
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cocoonstack/cocoon-common/auth"
 )
@@ -110,7 +111,7 @@ func TestSignAndVerifySessionRoundTrip(t *testing.T) {
 	want := &auth.Session{
 		User:  "Alice",
 		Email: "alice@example.com",
-		Exp:   1234567890,
+		Exp:   time.Now().Add(time.Hour).Unix(),
 	}
 
 	signed, err := auth.SignSession(*want, key)

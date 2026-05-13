@@ -2,10 +2,14 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -358,6 +362,86 @@ func TestUploadSessionsRollbackPoisonOnTruncateError(t *testing.T) {
 	}
 	if _, err := u.Append(id, strings.NewReader("x")); !errors.Is(err, errUploadNotFound) {
 		t.Errorf("post-poison Append: got %v, want errUploadNotFound", err)
+	}
+}
+
+// TestUploadSessionsConcurrentAppendDifferentSessions: Append on
+// different sessions must not serialize on the global mutex.
+func TestUploadSessionsConcurrentAppendDifferentSessions(t *testing.T) {
+	u := newTestUploadSessions(t)
+	const sessions = 20
+	const chunks = 8
+
+	ids := make([]string, sessions)
+	for i := range sessions {
+		ids[i] = mustStart(t, u)
+	}
+
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() {
+			payload := fmt.Sprintf("s%02d-", i)
+			for range chunks {
+				if _, err := u.Append(id, strings.NewReader(payload)); err != nil {
+					t.Errorf("Append session %d: %v", i, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	for i, id := range ids {
+		fu, err := u.Finalize(id)
+		if err != nil {
+			t.Fatalf("Finalize session %d: %v", i, err)
+		}
+		want := strings.Repeat(fmt.Sprintf("s%02d-", i), chunks)
+		if got := string(readFinalized(t, fu)); got != want {
+			t.Errorf("session %d data = %q, want %q", i, got, want)
+		}
+		_ = fu.Close()
+	}
+}
+
+// TestUploadSessionsFinalizedDigest: inline-computed digest must match
+// a fresh sha256, including across an over-cap rollback.
+func TestUploadSessionsFinalizedDigest(t *testing.T) {
+	u := newTestUploadSessions(t)
+	u.maxBytes = 32
+
+	id := mustStart(t, u)
+
+	first := []byte("hello world")
+	if _, err := u.Append(id, bytes.NewReader(first)); err != nil {
+		t.Fatalf("first Append: %v", err)
+	}
+	// This append exceeds the cap (11 + 30 > 32) and must be rolled
+	// back without polluting the running hash.
+	if _, err := u.Append(id, bytes.NewReader(bytes.Repeat([]byte("x"), 30))); !errors.Is(err, errUploadTooLarge) {
+		t.Fatalf("over-cap Append: got %v, want errUploadTooLarge", err)
+	}
+	second := []byte(" again")
+	if _, err := u.Append(id, bytes.NewReader(second)); err != nil {
+		t.Fatalf("second Append: %v", err)
+	}
+
+	fu, err := u.Finalize(id)
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	defer func() { _ = fu.Close() }()
+
+	want := append([]byte{}, first...)
+	want = append(want, second...)
+	wantHash := sha256.Sum256(want)
+	wantDigest := "sha256:" + hex.EncodeToString(wantHash[:])
+
+	if got := fu.Digest(); got != wantDigest {
+		t.Errorf("inline digest = %q, want %q", got, wantDigest)
+	}
+	if got := string(readFinalized(t, fu)); got != string(want) {
+		t.Errorf("finalized bytes = %q, want %q", got, string(want))
 	}
 }
 

@@ -253,6 +253,41 @@ func TestWithAuthV2BaseEndpointPassesWithToken(t *testing.T) {
 	}
 }
 
+// TestIsValidTokenStaticTokenConstantTime locks in the correctness side of
+// the constant-time path: only an exact match is accepted, and same-length /
+// prefix-similar candidates are rejected. Timing itself is not asserted.
+func TestIsValidTokenStaticTokenConstantTime(t *testing.T) {
+	s := &Server{registryToken: "correct-horse-battery-staple"}
+	cases := []struct {
+		name      string
+		candidate string
+		want      bool
+	}{
+		{"exact match", "correct-horse-battery-staple", true},
+		{"empty rejected", "", false},
+		{"prefix rejected", "correct", false},
+		{"wrong same length", "correct-horse-battery-stapXX", false},
+		{"longer rejected", "correct-horse-battery-staple-extra", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.isValidToken(t.Context(), tc.candidate); got != tc.want {
+				t.Errorf("isValidToken(%q) = %v, want %v", tc.candidate, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIsValidTokenEmptyRegistryTokenSkipsCompare confirms that when no
+// static registry token is configured the static branch is skipped and
+// only the store path is consulted (here: no store ⇒ false).
+func TestIsValidTokenEmptyRegistryTokenSkipsCompare(t *testing.T) {
+	s := &Server{}
+	if s.isValidToken(t.Context(), "anything") {
+		t.Errorf("isValidToken returned true with no token and no store")
+	}
+}
+
 // TestWithAuthDownloadIsPublic ensures /dl/ bypasses auth even when a
 // token is configured.
 func TestWithAuthDownloadIsPublic(t *testing.T) {

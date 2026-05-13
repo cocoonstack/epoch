@@ -12,7 +12,6 @@ const (
 	// OCI / Docker config blob types.
 	MediaTypeOCIImageConfig = "application/vnd.oci.image.config.v1+json"
 	MediaTypeDockerConfig   = "application/vnd.docker.container.image.v1+json"
-	MediaTypeOCIEmpty       = "application/vnd.oci.empty.v1+json"
 
 	// Cocoonstack artifactType discriminators.
 	// WindowsImage is the legacy name; epoch recognizes both.

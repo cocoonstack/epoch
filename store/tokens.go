@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -44,15 +45,20 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 }
 
 // DeleteToken removes a token by ID and invalidates the cache.
+// Order matters: invalidating first would let a concurrent
+// ValidateToken re-cache the still-extant row as valid for the full
+// TTL. Delete first; the post-delete invalidate is idempotent.
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
-	s.InvalidateTokenCache()
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete token %d: %w", id, err)
 	}
+	s.InvalidateTokenCache()
 	return nil
 }
 
-// ValidateToken checks whether a plaintext token is valid, using a cache.
+// ValidateToken checks whether a plaintext token is valid, using a
+// cache. Only definitive results (found / not-found) are cached;
+// transient DB errors return false without poisoning the cache.
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	logger := log.WithFunc("store.ValidateToken")
 	hash := utils.SHA256Hex([]byte(plaintext))
@@ -64,18 +70,25 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	}
 
 	var exists int
-	valid := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists) == nil
-	s.tokenCache.Store(hash, tokenCacheEntry{valid: valid, expires: time.Now().Add(tokenCacheTTL)})
-
-	if valid {
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists)
+	switch {
+	case err == nil:
+		s.tokenCache.Store(hash, tokenCacheEntry{valid: true, expires: time.Now().Add(tokenCacheTTL)})
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
-			if _, err := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-				logger.Warnf(bgCtx, "token last_used update failed: %v", err)
+			if _, updateErr := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); updateErr != nil {
+				logger.Warnf(bgCtx, "token last_used update failed: %v", updateErr)
 			}
 		}()
+		return true
+	case errors.Is(err, sql.ErrNoRows):
+		s.tokenCache.Store(hash, tokenCacheEntry{valid: false, expires: time.Now().Add(tokenCacheTTL)})
+		return false
+	default:
+		// Transient failure: reject without caching so the next call retries.
+		logger.Warnf(ctx, "token validation query failed: %v", err)
+		return false
 	}
-	return valid
 }
 
 // InvalidateTokenCache clears all cached token validation results.

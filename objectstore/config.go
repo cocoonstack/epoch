@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,7 +12,13 @@ import (
 	"strings"
 
 	commonk8s "github.com/cocoonstack/cocoon-common/k8s"
+	"github.com/projecteru2/core/log"
 )
+
+// envFileKeyPrefix scopes loadEnvFile to S3-only settings. A malicious or
+// careless ~/.config/epoch/s3.env entry must not be able to overwrite
+// PATH / HOME / etc. by sitting next to the legitimate EPOCH_S3_* keys.
+const envFileKeyPrefix = "EPOCH_"
 
 // Config holds S3-compatible object store connection settings.
 type Config struct {
@@ -25,7 +32,7 @@ type Config struct {
 }
 
 // ConfigFromEnv reads S3 settings from environment, falling back to ~/.config/epoch/s3.env.
-func ConfigFromEnv(prefix string) (*Config, error) {
+func ConfigFromEnv(ctx context.Context, prefix string) (*Config, error) {
 	envFile := commonk8s.EnvOrDefault("EPOCH_S3_ENV_FILE", filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
 
 	endpoint := os.Getenv("EPOCH_S3_ENDPOINT")
@@ -37,7 +44,7 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 	prefixValue := cmp.Or(os.Getenv("EPOCH_S3_PREFIX"), prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
-		if err := loadEnvFile(envFile); err == nil {
+		if err := loadEnvFile(ctx, envFile); err == nil {
 			endpoint = cmp.Or(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
 			accessKey = cmp.Or(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
 			secretKey = cmp.Or(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
@@ -115,7 +122,8 @@ func resolveSecure(secureRaw string, defaultSecure bool) (bool, error) {
 	return parsed, nil
 }
 
-func loadEnvFile(path string) error {
+func loadEnvFile(ctx context.Context, path string) error {
+	logger := log.WithFunc("objectstore.loadEnvFile")
 	data, err := os.ReadFile(path) //nolint:gosec // path comes from env var or well-known config location
 	if err != nil {
 		return err
@@ -129,7 +137,12 @@ func loadEnvFile(path string) error {
 		if !ok {
 			continue
 		}
-		_ = os.Setenv(strings.TrimSpace(k), strings.TrimSpace(v))
+		key := strings.TrimSpace(k)
+		if !strings.HasPrefix(key, envFileKeyPrefix) {
+			logger.Warnf(ctx, "ignoring non-%s key %q in env file %s", envFileKeyPrefix, key, path)
+			continue
+		}
+		_ = os.Setenv(key, strings.TrimSpace(v))
 	}
 	return nil
 }

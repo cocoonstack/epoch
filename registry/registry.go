@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/projecteru2/core/log"
+
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
 	"github.com/cocoonstack/epoch/utils"
@@ -36,8 +38,8 @@ func New(client *objectstore.Client) *Registry {
 }
 
 // NewFromEnv creates a Registry using S3 configuration from environment variables.
-func NewFromEnv() (*Registry, error) {
-	cfg, err := objectstore.ConfigFromEnv("epoch/")
+func NewFromEnv(ctx context.Context) (*Registry, error) {
+	cfg, err := objectstore.ConfigFromEnv(ctx, "epoch/")
 	if err != nil {
 		return nil, fmt.Errorf("load registry config: %w", err)
 	}
@@ -48,9 +50,15 @@ func NewFromEnv() (*Registry, error) {
 	return New(client), nil
 }
 
-// PushBlobFromStream uploads a blob, deduplicating if it already exists.
+// PushBlobFromStream uploads a blob, deduplicating if it already
+// exists. A failing Exists check falls through to Put (idempotent) but
+// logs at debug so the degraded dedup path is observable.
 func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body io.Reader, size int64) error {
-	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
+	exists, err := r.client.Exists(ctx, blobKey(digest))
+	if err != nil {
+		log.WithFunc("registry.PushBlobFromStream").Debugf(ctx, "exists check for %s failed, falling through to upload: %v", digest, err)
+	}
+	if exists {
 		return nil
 	}
 	return r.client.Put(ctx, blobKey(digest), body, size)

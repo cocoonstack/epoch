@@ -15,7 +15,14 @@ import (
 	"github.com/projecteru2/core/log"
 )
 
-const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
+const (
+	tokenExchangeBodyLimit = 1 << 20 // 1 MiB
+	ssoHTTPTimeout         = 30 * time.Second
+)
+
+// ssoClient bounds OAuth round-trips. The request ctx alone does not
+// protect us from an IdP that accepts the connection and then stalls.
+var ssoClient = &http.Client{Timeout: ssoHTTPTimeout}
 
 func (s *Server) setupAuthRoutes() {
 	s.router.HandleFunc("/login", s.handleLogin).Methods(http.MethodGet)
@@ -91,7 +98,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	tokenResp, err := http.DefaultClient.Do(tokenReq) //nolint:gosec // token URL comes from trusted SSO provider config
+	tokenResp, err := ssoClient.Do(tokenReq) //nolint:gosec // token URL comes from trusted SSO provider config
 	if err != nil {
 		logger.Error(ctx, err, "token exchange failed")
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
@@ -126,7 +133,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-	userResp, err := http.DefaultClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
+	userResp, err := ssoClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
 	if err != nil {
 		logger.Error(ctx, err, "userinfo fetch failed")
 		http.Error(w, "userinfo failed", http.StatusBadGateway)

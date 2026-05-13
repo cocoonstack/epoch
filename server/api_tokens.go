@@ -2,8 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 )
+
+const apiTokenBodyLimit = 1 << 16 // 64 KiB — token names are tiny
 
 func (s *Server) apiListTokens(w http.ResponseWriter, r *http.Request) {
 	tokens, err := s.store.ListTokens(r.Context())
@@ -18,7 +21,7 @@ func (s *Server) apiCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+	if err := json.NewDecoder(io.LimitReader(r.Body, apiTokenBodyLimit)).Decode(&req); err != nil || req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
