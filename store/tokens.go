@@ -45,12 +45,9 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 }
 
 // DeleteToken removes a token by ID and invalidates the cache.
-//
-// Order matters: the DB DELETE must happen BEFORE InvalidateTokenCache.
-// If invalidation runs first, a concurrent ValidateToken can race in
-// between (cache miss → DB SELECT → re-cache valid=true) and the token
-// stays usable for up to tokenCacheTTL after the DELETE. Deleting first
-// closes that window; the cache flush afterwards is idempotent.
+// Order matters: invalidating first would let a concurrent
+// ValidateToken re-cache the still-extant row as valid for the full
+// TTL. Delete first; the post-delete invalidate is idempotent.
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete token %d: %w", id, err)
@@ -59,12 +56,9 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ValidateToken checks whether a plaintext token is valid, using a cache.
-//
-// DB errors that are NOT sql.ErrNoRows (e.g. transient MySQL hiccups) are
-// returned as false but NOT cached, so a flaky connection cannot lock
-// legitimate users out for the full cache TTL. Only definitive lookups
-// (found or not-found) are persisted to the cache.
+// ValidateToken checks whether a plaintext token is valid, using a
+// cache. Only definitive results (found / not-found) are cached;
+// transient DB errors return false without poisoning the cache.
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	logger := log.WithFunc("store.ValidateToken")
 	hash := utils.SHA256Hex([]byte(plaintext))
@@ -91,9 +85,7 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 		s.tokenCache.Store(hash, tokenCacheEntry{valid: false, expires: time.Now().Add(tokenCacheTTL)})
 		return false
 	default:
-		// Transient DB failure — reject this attempt but do not cache the
-		// negative result, otherwise a flaky connection locks the token
-		// out for the full TTL.
+		// Transient failure: reject without caching so the next call retries.
 		logger.Warnf(ctx, "token validation query failed: %v", err)
 		return false
 	}

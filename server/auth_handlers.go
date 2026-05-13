@@ -20,11 +20,8 @@ const (
 	ssoHTTPTimeout         = 30 * time.Second
 )
 
-// ssoClient is the HTTP client used for OAuth token and userinfo
-// exchanges. The 30s timeout bounds the handler goroutine even when
-// the IdP stalls — the request ctx is also wired up, but an IdP that
-// accepts the TCP connection and then sleeps would otherwise pin the
-// goroutine until the client disconnects.
+// ssoClient bounds OAuth round-trips. The request ctx alone does not
+// protect us from an IdP that accepts the connection and then stalls.
 var ssoClient = &http.Client{Timeout: ssoHTTPTimeout}
 
 func (s *Server) setupAuthRoutes() {

@@ -12,10 +12,8 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// Compile-time interface check: ExecCocoon serves both pull paths,
-// so any drift in cloudimg.CocoonRunner (snapshot.CocoonRunner is
-// checked next to its definition) breaks the build here, not at the
-// pull site at the bottom of this file.
+// ExecCocoon also satisfies cloudimg.CocoonRunner; assert it here so
+// drift in cloudimg's interface fails the build, not the pull below.
 var _ cloudimg.CocoonRunner = (*snapshot.ExecCocoon)(nil)
 
 func newPullCmd() *cobra.Command {

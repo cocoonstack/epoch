@@ -117,10 +117,9 @@ func bearerToken(r *http.Request) string {
 	return token
 }
 
-// isValidToken reports whether candidate is an accepted registry token.
-// It checks the static push token first, then store-managed tokens.
-// The static-token comparison uses constant-time equality so an attacker
-// cannot probe for the token byte-by-byte via timing differences.
+// isValidToken reports whether candidate is an accepted registry
+// token. The static-token comparison is constant-time so an attacker
+// cannot probe the token via timing.
 func (s *Server) isValidToken(ctx context.Context, candidate string) bool {
 	if s.registryToken != "" &&
 		len(candidate) == len(s.registryToken) &&

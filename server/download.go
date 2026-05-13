@@ -25,12 +25,10 @@ func (r *registryBlobReader) ReadBlob(ctx context.Context, digest string) (io.Re
 }
 
 // registryDownloader adapts *registry.Registry to snapshot.Downloader.
-//
-// manifestRaw / manifestName / manifestTag form a tiny one-entry cache
-// for the manifest the caller is currently streaming, so we do not
-// round-trip back to S3 for it. The cache key includes the tag so a
-// later GetManifest(ctx, name, child.Digest) on an image-index child
-// goes to the registry instead of returning the parent manifest.
+// The manifest{Name,Tag,Raw} fields form a one-entry cache for the
+// already-fetched parent manifest; the tag is part of the key so
+// image-index child fetches (GetManifest with child.Digest) miss and
+// hit the registry by digest.
 type registryDownloader struct {
 	reg          manifestStreamer
 	manifestName string
@@ -48,10 +46,9 @@ func (d *registryDownloader) GetManifest(ctx context.Context, name, tag string) 
 	return raw, "", err
 }
 
-// fetchManifest honors digest references so image-index child fetches
-// (Stream calls GetManifest with child.Digest) hit the by-digest key
-// instead of being treated as tags. An empty tag is normalized to the
-// usual "latest" default.
+// fetchManifest routes sha256:-prefixed tags to ManifestJSONByDigest
+// so image-index child fetches resolve correctly; bare tags fall back
+// to ManifestJSON, defaulting an empty tag to "latest".
 func (d *registryDownloader) fetchManifest(ctx context.Context, name, tag string) ([]byte, error) {
 	if tag == "" {
 		tag = defaultTag

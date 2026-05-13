@@ -50,12 +50,9 @@ func NewFromEnv() (*Registry, error) {
 	return New(client), nil
 }
 
-// PushBlobFromStream uploads a blob, deduplicating if it already exists.
-//
-// A failing Exists check no longer silently falls through: we still
-// attempt the upload (the Put is idempotent if the object turned out to
-// exist) but the underlying error is logged at debug so an operator can
-// see when the dedup path is degraded.
+// PushBlobFromStream uploads a blob, deduplicating if it already
+// exists. A failing Exists check falls through to Put (idempotent) but
+// logs at debug so the degraded dedup path is observable.
 func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body io.Reader, size int64) error {
 	exists, err := r.client.Exists(ctx, blobKey(digest))
 	if err != nil {

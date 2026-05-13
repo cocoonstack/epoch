@@ -124,17 +124,10 @@ func (u *uploadSessions) Start() (string, error) {
 	return id, nil
 }
 
-// Append streams data into the session. Failed appends are rolled back.
-//
-// The long io.CopyBuffer runs under the per-session lock, not the
-// global map lock, so concurrent uploads to different sessions do not
-// serialize on each other.
-//
-// The hasher state is snapshotted before the write and restored on
-// rollback. crypto/sha256 implements encoding.BinaryMarshaler /
-// BinaryUnmarshaler so the snapshot is a fixed-size byte slice, not
-// a full re-scan. This means persistVerifiedBlob no longer needs to
-// re-read the whole tempfile to compute the digest.
+// Append streams data into the session. Failed appends are rolled
+// back, including the running sha256 hasher (see snapshotHash). The
+// long io.CopyBuffer runs under the per-session lock so concurrent
+// uploads to different sessions do not serialize on the map lock.
 func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	u.evictExpired()
 

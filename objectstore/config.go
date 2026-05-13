@@ -140,10 +140,6 @@ func loadEnvFile(path string) error {
 		}
 		key := strings.TrimSpace(k)
 		if !strings.HasPrefix(key, envFileKeyPrefix) {
-			// Refuse to set arbitrary env vars from disk. An attacker
-			// (or careless operator) could otherwise override PATH /
-			// HOME / LD_PRELOAD-style variables for the running
-			// process via the s3.env file.
 			logger.Warnf(ctx, "ignoring non-%s key %q in env file %s", envFileKeyPrefix, key, path)
 			continue
 		}
