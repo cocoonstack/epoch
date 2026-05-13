@@ -1,8 +1,12 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"sync"
@@ -24,12 +28,17 @@ var (
 
 // FinalizedUpload owns the tempfile of a finalized upload. Caller must Close it.
 type FinalizedUpload struct {
-	file *os.File
-	size int64
+	file   *os.File
+	size   int64
+	digest string // "sha256:..." computed inline during Append
 }
 
 // Size returns the total byte count of the upload.
 func (f *FinalizedUpload) Size() int64 { return f.size }
+
+// Digest returns the "sha256:..." digest computed while bytes streamed in.
+// Saves a second pass over a potentially multi-GiB tempfile in the caller.
+func (f *FinalizedUpload) Digest() string { return f.digest }
 
 // Reader returns a reader positioned at the start of the upload data.
 func (f *FinalizedUpload) Reader() (io.Reader, error) {
@@ -80,6 +89,7 @@ type uploadSessions struct {
 type uploadSession struct {
 	mu        sync.Mutex // serializes file writes and rollback for this session
 	file      *os.File
+	hasher    hash.Hash // running sha256 of bytes written to file
 	size      int64
 	createdAt time.Time
 	poisoned  bool // true after a failed rollback; subsequent appends rejected
@@ -109,7 +119,7 @@ func (u *uploadSessions) Start() (string, error) {
 	}
 	id := uuid.NewString()
 	u.mu.Lock()
-	u.sessions[id] = &uploadSession{file: f, createdAt: u.now()}
+	u.sessions[id] = &uploadSession{file: f, hasher: sha256.New(), createdAt: u.now()}
 	u.mu.Unlock()
 	return id, nil
 }
@@ -119,6 +129,12 @@ func (u *uploadSessions) Start() (string, error) {
 // The long io.CopyBuffer runs under the per-session lock, not the
 // global map lock, so concurrent uploads to different sessions do not
 // serialize on each other.
+//
+// The hasher state is snapshotted before the write and restored on
+// rollback. crypto/sha256 implements encoding.BinaryMarshaler /
+// BinaryUnmarshaler so the snapshot is a fixed-size byte slice, not
+// a full re-scan. This means persistVerifiedBlob no longer needs to
+// re-read the whole tempfile to compute the digest.
 func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	u.evictExpired()
 
@@ -140,16 +156,21 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 
 	startSize := sess.size
 	remaining := u.maxBytes - startSize
-	n, copyErr := io.CopyBuffer(sess.file, io.LimitReader(src, remaining+1), *bufPtr)
+	hashState, hashErr := snapshotHash(sess.hasher)
+	if hashErr != nil {
+		return startSize, fmt.Errorf("snapshot hash state: %w", hashErr)
+	}
+	dst := io.MultiWriter(sess.file, sess.hasher)
+	n, copyErr := io.CopyBuffer(dst, io.LimitReader(src, remaining+1), *bufPtr)
 	if copyErr != nil {
-		if rbErr := sess.rollback(startSize); rbErr != nil {
+		if rbErr := sess.rollback(startSize, hashState); rbErr != nil {
 			u.poison(id, sess)
 			return startSize, errors.Join(copyErr, rbErr)
 		}
 		return startSize, copyErr
 	}
 	if n > remaining {
-		if rbErr := sess.rollback(startSize); rbErr != nil {
+		if rbErr := sess.rollback(startSize, hashState); rbErr != nil {
 			u.poison(id, sess)
 			return startSize, errors.Join(errUploadTooLarge, rbErr)
 		}
@@ -174,7 +195,11 @@ func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	}
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	return &FinalizedUpload{file: sess.file, size: sess.size}, nil
+	return &FinalizedUpload{
+		file:   sess.file,
+		size:   sess.size,
+		digest: "sha256:" + hex.EncodeToString(sess.hasher.Sum(nil)),
+	}, nil
 }
 
 // Cancel aborts an upload session and removes its tempfile. The per-session
@@ -234,14 +259,36 @@ func (u *uploadSessions) evictExpired() {
 	}
 }
 
-func (s *uploadSession) rollback(startSize int64) error {
+func (s *uploadSession) rollback(startSize int64, hashState []byte) error {
 	if err := s.file.Truncate(startSize); err != nil {
 		return fmt.Errorf("truncate upload tempfile: %w", err)
 	}
 	if _, err := s.file.Seek(startSize, io.SeekStart); err != nil {
 		return fmt.Errorf("seek upload tempfile: %w", err)
 	}
+	if err := restoreHash(s.hasher, hashState); err != nil {
+		return fmt.Errorf("restore hash state: %w", err)
+	}
 	return nil
+}
+
+// snapshotHash captures the current hash.Hash state so a failed Append
+// can be rolled back without rehashing the prefix.
+func snapshotHash(h hash.Hash) ([]byte, error) {
+	marshaler, ok := h.(encoding.BinaryMarshaler)
+	if !ok {
+		return nil, errors.New("hash does not implement encoding.BinaryMarshaler")
+	}
+	return marshaler.MarshalBinary()
+}
+
+// restoreHash returns the hasher to a snapshot captured by snapshotHash.
+func restoreHash(h hash.Hash, state []byte) error {
+	unmarshaler, ok := h.(encoding.BinaryUnmarshaler)
+	if !ok {
+		return errors.New("hash does not implement encoding.BinaryUnmarshaler")
+	}
+	return unmarshaler.UnmarshalBinary(state)
 }
 
 func closeUploadFile(f *os.File) {

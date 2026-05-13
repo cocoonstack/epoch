@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -403,6 +405,50 @@ func TestUploadSessionsConcurrentAppendDifferentSessions(t *testing.T) {
 			t.Errorf("session %d data = %q, want %q", i, got, want)
 		}
 		_ = fu.Close()
+	}
+}
+
+// TestUploadSessionsFinalizedDigest verifies that the digest computed
+// inline during Append matches a fresh sha256 over the same bytes. The
+// test also walks the rollback path (over-cap append) to confirm the
+// hasher snapshot/restore keeps the running digest in sync with the
+// retained file contents.
+func TestUploadSessionsFinalizedDigest(t *testing.T) {
+	u := newTestUploadSessions(t)
+	u.maxBytes = 32
+
+	id := mustStart(t, u)
+
+	first := []byte("hello world")
+	if _, err := u.Append(id, bytes.NewReader(first)); err != nil {
+		t.Fatalf("first Append: %v", err)
+	}
+	// This append exceeds the cap (11 + 30 > 32) and must be rolled
+	// back without polluting the running hash.
+	if _, err := u.Append(id, bytes.NewReader(bytes.Repeat([]byte("x"), 30))); !errors.Is(err, errUploadTooLarge) {
+		t.Fatalf("over-cap Append: got %v, want errUploadTooLarge", err)
+	}
+	second := []byte(" again")
+	if _, err := u.Append(id, bytes.NewReader(second)); err != nil {
+		t.Fatalf("second Append: %v", err)
+	}
+
+	fu, err := u.Finalize(id)
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	defer func() { _ = fu.Close() }()
+
+	want := append([]byte{}, first...)
+	want = append(want, second...)
+	wantHash := sha256.Sum256(want)
+	wantDigest := "sha256:" + hex.EncodeToString(wantHash[:])
+
+	if got := fu.Digest(); got != wantDigest {
+		t.Errorf("inline digest = %q, want %q", got, wantDigest)
+	}
+	if got := string(readFinalized(t, fu)); got != string(want) {
+		t.Errorf("finalized bytes = %q, want %q", got, string(want))
 	}
 }
 

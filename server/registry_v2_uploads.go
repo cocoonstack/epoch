@@ -1,8 +1,6 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -105,25 +103,16 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 }
 
 // persistVerifiedBlob verifies the digest then streams to the object store.
+// The digest is computed inline during Append, so this function no longer
+// has to re-read the tempfile for hashing.
 func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, name, digest string, fu *FinalizedUpload) {
-	rdr, err := fu.Reader()
-	if err != nil {
-		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		return
-	}
-	h := sha256.New()
-	if _, hashErr := io.Copy(h, rdr); hashErr != nil {
-		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "hash upload: "+hashErr.Error())
-		return
-	}
-	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	if got != digest {
+	if got := fu.Digest(); got != digest {
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
 			fmt.Sprintf("digest mismatch: got %s, expected %s", got, digest))
 		return
 	}
 
-	rdr, err = fu.Reader()
+	rdr, err := fu.Reader()
 	if err != nil {
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
