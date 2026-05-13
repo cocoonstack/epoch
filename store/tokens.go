@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,6 +60,11 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 }
 
 // ValidateToken checks whether a plaintext token is valid, using a cache.
+//
+// DB errors that are NOT sql.ErrNoRows (e.g. transient MySQL hiccups) are
+// returned as false but NOT cached, so a flaky connection cannot lock
+// legitimate users out for the full cache TTL. Only definitive lookups
+// (found or not-found) are persisted to the cache.
 func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	logger := log.WithFunc("store.ValidateToken")
 	hash := utils.SHA256Hex([]byte(plaintext))
@@ -70,18 +76,27 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 	}
 
 	var exists int
-	valid := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists) == nil
-	s.tokenCache.Store(hash, tokenCacheEntry{valid: valid, expires: time.Now().Add(tokenCacheTTL)})
-
-	if valid {
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE token_hash = ? LIMIT 1`, hash).Scan(&exists)
+	switch {
+	case err == nil:
+		s.tokenCache.Store(hash, tokenCacheEntry{valid: true, expires: time.Now().Add(tokenCacheTTL)})
 		bgCtx := context.WithoutCancel(ctx)
 		go func() {
-			if _, err := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); err != nil {
-				logger.Warnf(bgCtx, "token last_used update failed: %v", err)
+			if _, updateErr := s.db.ExecContext(bgCtx, `UPDATE tokens SET last_used = NOW() WHERE token_hash = ?`, hash); updateErr != nil {
+				logger.Warnf(bgCtx, "token last_used update failed: %v", updateErr)
 			}
 		}()
+		return true
+	case errors.Is(err, sql.ErrNoRows):
+		s.tokenCache.Store(hash, tokenCacheEntry{valid: false, expires: time.Now().Add(tokenCacheTTL)})
+		return false
+	default:
+		// Transient DB failure — reject this attempt but do not cache the
+		// negative result, otherwise a flaky connection locks the token
+		// out for the full TTL.
+		logger.Warnf(ctx, "token validation query failed: %v", err)
+		return false
 	}
-	return valid
 }
 
 // InvalidateTokenCache clears all cached token validation results.
