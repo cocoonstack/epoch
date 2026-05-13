@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,7 +12,13 @@ import (
 	"strings"
 
 	commonk8s "github.com/cocoonstack/cocoon-common/k8s"
+	"github.com/projecteru2/core/log"
 )
+
+// envFileKeyPrefix scopes loadEnvFile to S3-only settings. A malicious or
+// careless ~/.config/epoch/s3.env entry must not be able to overwrite
+// PATH / HOME / etc. by sitting next to the legitimate EPOCH_S3_* keys.
+const envFileKeyPrefix = "EPOCH_"
 
 // Config holds S3-compatible object store connection settings.
 type Config struct {
@@ -116,6 +123,8 @@ func resolveSecure(secureRaw string, defaultSecure bool) (bool, error) {
 }
 
 func loadEnvFile(path string) error {
+	logger := log.WithFunc("objectstore.loadEnvFile")
+	ctx := context.Background()
 	data, err := os.ReadFile(path) //nolint:gosec // path comes from env var or well-known config location
 	if err != nil {
 		return err
@@ -129,7 +138,16 @@ func loadEnvFile(path string) error {
 		if !ok {
 			continue
 		}
-		_ = os.Setenv(strings.TrimSpace(k), strings.TrimSpace(v))
+		key := strings.TrimSpace(k)
+		if !strings.HasPrefix(key, envFileKeyPrefix) {
+			// Refuse to set arbitrary env vars from disk. An attacker
+			// (or careless operator) could otherwise override PATH /
+			// HOME / LD_PRELOAD-style variables for the running
+			// process via the s3.env file.
+			logger.Warnf(ctx, "ignoring non-%s key %q in env file %s", envFileKeyPrefix, key, path)
+			continue
+		}
+		_ = os.Setenv(key, strings.TrimSpace(v))
 	}
 	return nil
 }
