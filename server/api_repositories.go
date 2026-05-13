@@ -95,6 +95,18 @@ func (s *Server) apiDeleteTag(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	tag := urlVar(r, "tag")
 
+	// The control-plane API is tag-only. A sha256-prefixed ref would
+	// otherwise be passed straight to DeleteManifest as a tag name and
+	// silently no-op (the object store has no such key), or worse:
+	// match an actual tag literally named "sha256:...". Reject up front
+	// and steer the caller at the v2 delete-by-digest endpoint, which
+	// already branches on this shape.
+	if isDigestRef(tag) {
+		writeError(w, http.StatusBadRequest,
+			"digest references are not allowed here; use DELETE /v2/{name}/manifests/{digest}")
+		return
+	}
+
 	if err := s.reg.DeleteManifest(r.Context(), name, tag); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
