@@ -15,7 +15,17 @@ import (
 	"github.com/projecteru2/core/log"
 )
 
-const tokenExchangeBodyLimit = 1 << 20 // 1 MiB
+const (
+	tokenExchangeBodyLimit = 1 << 20 // 1 MiB
+	ssoHTTPTimeout         = 30 * time.Second
+)
+
+// ssoClient is the HTTP client used for OAuth token and userinfo
+// exchanges. The 30s timeout bounds the handler goroutine even when
+// the IdP stalls — the request ctx is also wired up, but an IdP that
+// accepts the TCP connection and then sleeps would otherwise pin the
+// goroutine until the client disconnects.
+var ssoClient = &http.Client{Timeout: ssoHTTPTimeout}
 
 func (s *Server) setupAuthRoutes() {
 	s.router.HandleFunc("/login", s.handleLogin).Methods(http.MethodGet)
@@ -91,7 +101,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	tokenResp, err := http.DefaultClient.Do(tokenReq) //nolint:gosec // token URL comes from trusted SSO provider config
+	tokenResp, err := ssoClient.Do(tokenReq) //nolint:gosec // token URL comes from trusted SSO provider config
 	if err != nil {
 		logger.Error(ctx, err, "token exchange failed")
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
@@ -126,7 +136,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-	userResp, err := http.DefaultClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
+	userResp, err := ssoClient.Do(userReq) //nolint:gosec // user info endpoint comes from trusted SSO provider config
 	if err != nil {
 		logger.Error(ctx, err, "userinfo fetch failed")
 		http.Error(w, "userinfo failed", http.StatusBadGateway)
