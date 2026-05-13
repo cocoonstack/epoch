@@ -12,8 +12,7 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
-// ExecCocoon also satisfies cloudimg.CocoonRunner; assert it here so
-// drift in cloudimg's interface fails the build, not the pull below.
+// Fail at build-time on cloudimg.CocoonRunner interface drift.
 var _ cloudimg.CocoonRunner = (*snapshot.ExecCocoon)(nil)
 
 func newPullCmd() *cobra.Command {

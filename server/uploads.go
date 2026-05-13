@@ -36,8 +36,7 @@ type FinalizedUpload struct {
 // Size returns the total byte count of the upload.
 func (f *FinalizedUpload) Size() int64 { return f.size }
 
-// Digest returns the "sha256:..." digest computed while bytes streamed in.
-// Saves a second pass over a potentially multi-GiB tempfile in the caller.
+// Digest returns the "sha256:..." digest computed inline during Append.
 func (f *FinalizedUpload) Digest() string { return f.digest }
 
 // Reader returns a reader positioned at the start of the upload data.
@@ -140,10 +139,7 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
 	// Re-check TTL under sess.mu: a concurrent evictExpired may have
-	// removed this session from the map between our lookup and lock
-	// acquisition. Without this guard, the Append would return success
-	// for bytes that are immediately discarded when eviction proceeds to
-	// close the tempfile.
+	// removed sess from the map between our lookup and this lock.
 	if sess.poisoned || u.now().Sub(sess.createdAt) > u.ttl {
 		return sess.size, errUploadNotFound
 	}

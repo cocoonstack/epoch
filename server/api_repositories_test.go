@@ -8,10 +8,8 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// TestAPIDeleteTagRejectsDigest verifies the control-plane DELETE endpoint
-// refuses a digest-shaped {tag} value and tells the caller to use the v2
-// delete-by-digest route. Without this gate the call falls through to
-// DeleteManifest with the digest treated as a tag and silently no-ops.
+// TestAPIDeleteTagRejectsDigest: without the gate, a sha256: tag would
+// reach DeleteManifest as a literal tag name and silently no-op.
 func TestAPIDeleteTagRejectsDigest(t *testing.T) {
 	s := &Server{}
 	r := mux.NewRouter()
