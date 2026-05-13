@@ -38,8 +38,8 @@ func New(client *objectstore.Client) *Registry {
 }
 
 // NewFromEnv creates a Registry using S3 configuration from environment variables.
-func NewFromEnv() (*Registry, error) {
-	cfg, err := objectstore.ConfigFromEnv("epoch/")
+func NewFromEnv(ctx context.Context) (*Registry, error) {
+	cfg, err := objectstore.ConfigFromEnv(ctx, "epoch/")
 	if err != nil {
 		return nil, fmt.Errorf("load registry config: %w", err)
 	}

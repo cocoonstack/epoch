@@ -28,7 +28,7 @@ Requires a MySQL database. Start one with:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
-			reg, err := registry.NewFromEnv()
+			reg, err := registry.NewFromEnv(ctx)
 			if err != nil {
 				return fmt.Errorf("init registry: %w", err)
 			}

@@ -36,7 +36,7 @@ SOMETHING_ELSE=ignored
 		t.Setenv(k, "sentinel-"+k)
 	}
 
-	if err := loadEnvFile(envPath); err != nil {
+	if err := loadEnvFile(t.Context(), envPath); err != nil {
 		t.Fatalf("loadEnvFile: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func TestLoadEnvFileMalformedLines(t *testing.T) {
 	}
 	t.Setenv("EPOCH_S3_REGION", "sentinel")
 
-	if err := loadEnvFile(envPath); err != nil {
+	if err := loadEnvFile(t.Context(), envPath); err != nil {
 		t.Fatalf("loadEnvFile: %v", err)
 	}
 	if got := os.Getenv("EPOCH_S3_REGION"); got != "us-east-1" {

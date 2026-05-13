@@ -32,7 +32,7 @@ type Config struct {
 }
 
 // ConfigFromEnv reads S3 settings from environment, falling back to ~/.config/epoch/s3.env.
-func ConfigFromEnv(prefix string) (*Config, error) {
+func ConfigFromEnv(ctx context.Context, prefix string) (*Config, error) {
 	envFile := commonk8s.EnvOrDefault("EPOCH_S3_ENV_FILE", filepath.Join(userHomeDir(), ".config", "epoch", "s3.env"))
 
 	endpoint := os.Getenv("EPOCH_S3_ENDPOINT")
@@ -44,7 +44,7 @@ func ConfigFromEnv(prefix string) (*Config, error) {
 	prefixValue := cmp.Or(os.Getenv("EPOCH_S3_PREFIX"), prefix)
 
 	if endpoint == "" || accessKey == "" || bucket == "" {
-		if err := loadEnvFile(envFile); err == nil {
+		if err := loadEnvFile(ctx, envFile); err == nil {
 			endpoint = cmp.Or(endpoint, os.Getenv("EPOCH_S3_ENDPOINT"))
 			accessKey = cmp.Or(accessKey, os.Getenv("EPOCH_S3_ACCESS_KEY"))
 			secretKey = cmp.Or(secretKey, os.Getenv("EPOCH_S3_SECRET_KEY"))
@@ -122,9 +122,8 @@ func resolveSecure(secureRaw string, defaultSecure bool) (bool, error) {
 	return parsed, nil
 }
 
-func loadEnvFile(path string) error {
+func loadEnvFile(ctx context.Context, path string) error {
 	logger := log.WithFunc("objectstore.loadEnvFile")
-	ctx := context.Background()
 	data, err := os.ReadFile(path) //nolint:gosec // path comes from env var or well-known config location
 	if err != nil {
 		return err
