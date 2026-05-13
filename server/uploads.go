@@ -124,10 +124,9 @@ func (u *uploadSessions) Start() (string, error) {
 	return id, nil
 }
 
-// Append streams data into the session. Failed appends are rolled
-// back, including the running sha256 hasher (see snapshotHash). The
-// long io.CopyBuffer runs under the per-session lock so concurrent
-// uploads to different sessions do not serialize on the map lock.
+// Append streams data into the session. Failed appends roll back the
+// running sha256 hasher too (see snapshotHash) so a retried PATCH does
+// not double-hash the survivor bytes.
 func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 	u.evictExpired()
 
@@ -174,8 +173,6 @@ func (u *uploadSessions) Append(id string, src io.Reader) (int64, error) {
 }
 
 // Finalize completes an upload session and returns the finalized upload.
-// The per-session lock is acquired so an in-flight Append on the same id
-// has fully unwound before the tempfile ownership transfers.
 func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	u.mu.Lock()
 	sess, ok := u.sessions[id]
@@ -195,8 +192,7 @@ func (u *uploadSessions) Finalize(id string) (*FinalizedUpload, error) {
 	}, nil
 }
 
-// Cancel aborts an upload session and removes its tempfile. The per-session
-// lock is acquired so an in-flight Append finishes before the file closes.
+// Cancel aborts an upload session and removes its tempfile.
 func (u *uploadSessions) Cancel(id string) {
 	u.mu.Lock()
 	sess, ok := u.sessions[id]
@@ -219,9 +215,8 @@ func (u *uploadSessions) Len() int {
 	return len(u.sessions)
 }
 
-// poison evicts a session whose rollback failed. Caller must hold sess.mu
-// so the file close cannot race with another write on the same session;
-// the global mu is acquired here to remove the map entry.
+// poison evicts a session whose rollback failed. Caller must hold sess.mu;
+// this function acquires u.mu to remove the map entry.
 func (u *uploadSessions) poison(id string, sess *uploadSession) {
 	sess.poisoned = true
 	u.mu.Lock()
@@ -230,10 +225,9 @@ func (u *uploadSessions) poison(id string, sess *uploadSession) {
 	closeUploadFile(sess.file)
 }
 
-// evictExpired removes every session past its TTL from the map and
-// closes its tempfile. The close runs OUTSIDE the global map lock and
-// under each session's own mu, so an in-flight Append on the evicted
-// session unwinds first.
+// evictExpired drops every session past its TTL. Each tempfile is closed
+// OUTSIDE the global map lock and under the session's own mu so an
+// in-flight Append on the evicted session unwinds first.
 func (u *uploadSessions) evictExpired() {
 	cutoff := u.now().Add(-u.ttl)
 	var expired []*uploadSession

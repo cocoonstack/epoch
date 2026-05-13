@@ -365,12 +365,10 @@ func TestUploadSessionsRollbackPoisonOnTruncateError(t *testing.T) {
 	}
 }
 
-// TestUploadSessionsConcurrentAppendDifferentSessions verifies that
-// Append on different sessions does NOT serialize on the global mutex.
-// Each goroutine writes a session-specific payload; with the per-session
-// lock refactor the run completes well under the timeout, the race
-// detector stays quiet, and every session ends up with exactly the
-// bytes its goroutine wrote.
+// TestUploadSessionsConcurrentAppendDifferentSessions asserts that
+// Append on different sessions does NOT serialize on the global mutex
+// and that every session ends up with exactly the bytes its goroutine
+// wrote. Race-detector-clean under -race.
 func TestUploadSessionsConcurrentAppendDifferentSessions(t *testing.T) {
 	u := newTestUploadSessions(t)
 	const sessions = 20
@@ -408,11 +406,9 @@ func TestUploadSessionsConcurrentAppendDifferentSessions(t *testing.T) {
 	}
 }
 
-// TestUploadSessionsFinalizedDigest verifies that the digest computed
-// inline during Append matches a fresh sha256 over the same bytes. The
-// test also walks the rollback path (over-cap append) to confirm the
-// hasher snapshot/restore keeps the running digest in sync with the
-// retained file contents.
+// TestUploadSessionsFinalizedDigest asserts that the digest computed
+// inline during Append matches a fresh sha256 over the retained bytes,
+// including across an over-cap append that triggers hash rollback.
 func TestUploadSessionsFinalizedDigest(t *testing.T) {
 	u := newTestUploadSessions(t)
 	u.maxBytes = 32

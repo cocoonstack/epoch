@@ -253,11 +253,9 @@ func TestWithAuthV2BaseEndpointPassesWithToken(t *testing.T) {
 	}
 }
 
-// TestIsValidTokenStaticTokenConstantTime exercises the constant-time
-// comparison path for the static registry token: only an exact match is
-// accepted, and same-length / prefix-similar candidates are rejected.
-// We cannot meaningfully assert timing here, but we lock in correctness so
-// the constant-time branch is exercised by the test suite.
+// TestIsValidTokenStaticTokenConstantTime locks in the correctness side of
+// the constant-time path: only an exact match is accepted, and same-length /
+// prefix-similar candidates are rejected. Timing itself is not asserted.
 func TestIsValidTokenStaticTokenConstantTime(t *testing.T) {
 	s := &Server{registryToken: "correct-horse-battery-staple"}
 	cases := []struct {
