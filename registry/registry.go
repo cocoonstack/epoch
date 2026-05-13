@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/projecteru2/core/log"
+
 	"github.com/cocoonstack/epoch/manifest"
 	"github.com/cocoonstack/epoch/objectstore"
 	"github.com/cocoonstack/epoch/utils"
@@ -49,8 +51,17 @@ func NewFromEnv() (*Registry, error) {
 }
 
 // PushBlobFromStream uploads a blob, deduplicating if it already exists.
+//
+// A failing Exists check no longer silently falls through: we still
+// attempt the upload (the Put is idempotent if the object turned out to
+// exist) but the underlying error is logged at debug so an operator can
+// see when the dedup path is degraded.
 func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body io.Reader, size int64) error {
-	if exists, _ := r.client.Exists(ctx, blobKey(digest)); exists {
+	exists, err := r.client.Exists(ctx, blobKey(digest))
+	if err != nil {
+		log.WithFunc("registry.PushBlobFromStream").Debugf(ctx, "exists check for %s failed, falling through to upload: %v", digest, err)
+	}
+	if exists {
 		return nil
 	}
 	return r.client.Put(ctx, blobKey(digest), body, size)
