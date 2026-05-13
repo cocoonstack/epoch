@@ -44,11 +44,17 @@ func (s *Store) ListTokens(ctx context.Context) ([]Token, error) {
 }
 
 // DeleteToken removes a token by ID and invalidates the cache.
+//
+// Order matters: the DB DELETE must happen BEFORE InvalidateTokenCache.
+// If invalidation runs first, a concurrent ValidateToken can race in
+// between (cache miss → DB SELECT → re-cache valid=true) and the token
+// stays usable for up to tokenCacheTTL after the DELETE. Deleting first
+// closes that window; the cache flush afterwards is idempotent.
 func (s *Store) DeleteToken(ctx context.Context, id int64) error {
-	s.InvalidateTokenCache()
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete token %d: %w", id, err)
 	}
+	s.InvalidateTokenCache()
 	return nil
 }
 
