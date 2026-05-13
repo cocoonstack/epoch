@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -358,6 +360,49 @@ func TestUploadSessionsRollbackPoisonOnTruncateError(t *testing.T) {
 	}
 	if _, err := u.Append(id, strings.NewReader("x")); !errors.Is(err, errUploadNotFound) {
 		t.Errorf("post-poison Append: got %v, want errUploadNotFound", err)
+	}
+}
+
+// TestUploadSessionsConcurrentAppendDifferentSessions verifies that
+// Append on different sessions does NOT serialize on the global mutex.
+// Each goroutine writes a session-specific payload; with the per-session
+// lock refactor the run completes well under the timeout, the race
+// detector stays quiet, and every session ends up with exactly the
+// bytes its goroutine wrote.
+func TestUploadSessionsConcurrentAppendDifferentSessions(t *testing.T) {
+	u := newTestUploadSessions(t)
+	const sessions = 20
+	const chunks = 8
+
+	ids := make([]string, sessions)
+	for i := range sessions {
+		ids[i] = mustStart(t, u)
+	}
+
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() {
+			payload := fmt.Sprintf("s%02d-", i)
+			for range chunks {
+				if _, err := u.Append(id, strings.NewReader(payload)); err != nil {
+					t.Errorf("Append session %d: %v", i, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	for i, id := range ids {
+		fu, err := u.Finalize(id)
+		if err != nil {
+			t.Fatalf("Finalize session %d: %v", i, err)
+		}
+		want := strings.Repeat(fmt.Sprintf("s%02d-", i), chunks)
+		if got := string(readFinalized(t, fu)); got != want {
+			t.Errorf("session %d data = %q, want %q", i, got, want)
+		}
+		_ = fu.Close()
 	}
 }
 
