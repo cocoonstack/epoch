@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -15,7 +17,10 @@ import (
 
 func main() {
 	ctx := context.Background()
-	commonlog.Setup(ctx, "EPOCH_LOG_LEVEL")
+	if err := commonlog.Setup(ctx, "EPOCH_LOG_LEVEL"); err != nil {
+		fmt.Fprintf(os.Stderr, "setup log: %v\n", err)
+		os.Exit(1)
+	}
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	cmd.Execute(ctx)
