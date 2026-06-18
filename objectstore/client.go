@@ -58,6 +58,16 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, size int64
 	return nil
 }
 
+// PresignGet returns a time-limited URL that lets a client GET the object
+// directly from the backing store, bypassing this process.
+func (c *Client) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	u, err := c.client.PresignedGetObject(ctx, c.cfg.Bucket, c.fullKey(key), ttl, nil)
+	if err != nil {
+		return "", fmt.Errorf("presign get %s: %w", key, err)
+	}
+	return u.String(), nil
+}
+
 // Get returns a streaming reader and size for the given key.
 func (c *Client) Get(ctx context.Context, key string) (io.ReadCloser, int64, error) {
 	obj, err := c.client.GetObject(ctx, c.cfg.Bucket, c.fullKey(key), minio.GetObjectOptions{})

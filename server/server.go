@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	commonhttpx "github.com/cocoonstack/cocoon-common/httpx"
@@ -29,9 +30,11 @@ var _ http.ResponseWriter = (*responseWriter)(nil)
 
 // Server is the Epoch HTTP server providing OCI Distribution and control plane APIs.
 type Server struct {
-	addr          string     // config
-	registryToken string     // config — Bearer token for /v2/ (empty = no token required)
-	sso           *SSOConfig // config — nil = UI auth disabled
+	addr            string     // config
+	registryToken   string     // config — Bearer token for /v2/ (empty = no token required)
+	sso             *SSOConfig // config — nil = UI auth disabled
+	blobRedirect    bool       // config — redirect blob GETs to presigned object-store URLs
+	blobRedirectTTL time.Duration
 
 	reg   *registry.Registry // resources
 	store *store.Store       // resources
@@ -54,14 +57,21 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	if regToken != "" {
 		logger.Info(ctx, "registry token auth enabled")
 	}
+	blobRedirect, _ := strconv.ParseBool(os.Getenv("EPOCH_BLOB_REDIRECT"))
+	blobRedirectTTL := resolveBlobRedirectTTL(os.Getenv("EPOCH_BLOB_REDIRECT_TTL"))
+	if blobRedirect {
+		logger.Infof(ctx, "blob redirect enabled, ttl=%s", blobRedirectTTL)
+	}
 	s := &Server{
-		addr:          addr,
-		registryToken: regToken,
-		sso:           sso,
-		reg:           reg,
-		store:         st,
-		router:        mux.NewRouter(),
-		uploads:       newUploadSessions(resolveUploadDir(ctx)),
+		addr:            addr,
+		registryToken:   regToken,
+		sso:             sso,
+		blobRedirect:    blobRedirect,
+		blobRedirectTTL: blobRedirectTTL,
+		reg:             reg,
+		store:           st,
+		router:          mux.NewRouter(),
+		uploads:         newUploadSessions(resolveUploadDir(ctx)),
 	}
 	s.setupRoutes(ctx)
 	return s
