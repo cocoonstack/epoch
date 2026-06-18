@@ -1,11 +1,15 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/projecteru2/core/log"
 )
 
 const uploadBodyLimit = defaultUploadMaxBytes
@@ -20,6 +24,7 @@ func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 
 	id, err := s.uploads.Start()
 	if err != nil {
+		log.WithFunc("server.v2InitBlobUpload").Errorf(r.Context(), err, "start upload session failed")
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -78,31 +83,41 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 	s.persistVerifiedBlob(w, r, name, digest, fu)
 }
 
+// persistMonolithicUpload streams a single-PUT blob (digest known up front)
+// straight to the object store while hashing inline — no disk spool, receive
+// and upload overlap. The digest is verified after the stream drains; a
+// mismatch deletes the object so the content-addressed key never keeps
+// unverified bytes (the verify happens the instant the upload completes, so the
+// window is negligible and content-addressing protects readers regardless).
 func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
-	id, err := s.uploads.Start()
-	if err != nil {
-		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		return
-	}
-	body := io.LimitReader(r.Body, uploadBodyLimit)
-	if _, appendErr := s.uploads.Append(id, body); appendErr != nil {
-		drainBody(body)
-		s.uploads.Cancel(id)
-		writeUploadAppendError(w, appendErr)
-		return
-	}
-	fu, err := s.uploads.Finalize(id)
-	if err != nil {
-		drainBody(body)
-		writeUploadAppendError(w, err)
-		return
-	}
-	defer func() { _ = fu.Close() }()
+	dgst := stripSHA256Prefix(digest)
 
-	s.persistVerifiedBlob(w, r, name, digest, fu)
+	if exists, err := s.reg.BlobExists(r.Context(), dgst); err == nil && exists {
+		drainBody(r.Body)
+		s.blobCreated(w, name, digest)
+		return
+	}
+
+	hasher := sha256.New()
+	body := io.TeeReader(io.LimitReader(r.Body, uploadBodyLimit), hasher)
+	if err := s.reg.PushBlobStreaming(r.Context(), dgst, body, r.ContentLength); err != nil {
+		log.WithFunc("server.persistMonolithicUpload").Errorf(r.Context(), err, "stream blob sha256:%s (content-length=%d) failed", dgst, r.ContentLength)
+		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_INVALID", err.Error())
+		return
+	}
+
+	if got := "sha256:" + hex.EncodeToString(hasher.Sum(nil)); got != digest {
+		_ = s.reg.DeleteBlob(r.Context(), dgst)
+		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
+			fmt.Sprintf("digest mismatch: got %s, expected %s", got, digest))
+		return
+	}
+	s.blobCreated(w, name, digest)
 }
 
 // persistVerifiedBlob verifies the digest then streams to the object store.
+// Used by the chunked PATCH upload path, where the full blob is spooled to
+// disk first so the digest can be checked before it reaches the object store.
 func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, name, digest string, fu *FinalizedUpload) {
 	if got := fu.Digest(); got != digest {
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
@@ -112,14 +127,19 @@ func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, nam
 
 	rdr, err := fu.Reader()
 	if err != nil {
+		log.WithFunc("server.persistVerifiedBlob").Errorf(r.Context(), err, "open spooled blob %s failed", digest)
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 	if err := s.reg.PushBlobFromStream(r.Context(), stripSHA256Prefix(digest), rdr, fu.Size()); err != nil {
+		log.WithFunc("server.persistVerifiedBlob").Errorf(r.Context(), err, "push spooled blob %s (size=%d) failed", digest, fu.Size())
 		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_INVALID", err.Error())
 		return
 	}
+	s.blobCreated(w, name, digest)
+}
 
+func (s *Server) blobCreated(w http.ResponseWriter, name, digest string) {
 	w.Header().Set("Location", fmt.Sprintf("/v2/%s/blobs/%s", name, digest))
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.WriteHeader(http.StatusCreated)

@@ -64,6 +64,12 @@ func (r *Registry) PushBlobFromStream(ctx context.Context, digest string, body i
 	return r.client.Put(ctx, blobKey(digest), body, size)
 }
 
+// PushBlobStreaming streams a blob straight to the object store without
+// buffering it whole. The caller verifies the digest after the stream drains.
+func (r *Registry) PushBlobStreaming(ctx context.Context, digest string, body io.Reader, size int64) error {
+	return r.client.PutStreaming(ctx, blobKey(digest), body, size)
+}
+
 // BlobExists reports whether a blob with the given digest exists.
 func (r *Registry) BlobExists(ctx context.Context, digest string) (bool, error) {
 	return r.client.Exists(ctx, blobKey(digest))
