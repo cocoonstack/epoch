@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	commonhttpx "github.com/cocoonstack/cocoon-common/httpx"
@@ -22,8 +23,9 @@ import (
 )
 
 const (
-	defaultUploadSpoolDir = "/var/cache/epoch/uploads"
-	shutdownTimeout       = 15 * time.Second
+	defaultUploadSpoolDir      = "/var/cache/epoch/uploads"
+	shutdownTimeout            = 15 * time.Second
+	defaultMaxStreamingUploads = 8
 )
 
 var _ http.ResponseWriter = (*responseWriter)(nil)
@@ -42,6 +44,7 @@ type Server struct {
 	router    *mux.Router     // runtime
 	uploads   *uploadSessions // runtime
 	uiHandler http.Handler    // runtime
+	streamSem chan struct{}   // runtime — caps concurrent 256 MiB streaming uploads
 }
 
 // New creates a Server with routes, auth, and upload sessions configured.
@@ -62,6 +65,8 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	if blobRedirect {
 		logger.Infof(ctx, "blob redirect enabled, ttl=%s", blobRedirectTTL)
 	}
+	maxStreams := resolveMaxStreamingUploads(os.Getenv("EPOCH_MAX_STREAMING_UPLOADS"))
+	logger.Infof(ctx, "max concurrent streaming uploads: %d", maxStreams)
 	s := &Server{
 		addr:            addr,
 		registryToken:   regToken,
@@ -72,6 +77,7 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 		store:           st,
 		router:          mux.NewRouter(),
 		uploads:         newUploadSessions(resolveUploadDir(ctx)),
+		streamSem:       make(chan struct{}, maxStreams),
 	}
 	s.setupRoutes(ctx)
 	return s
@@ -224,6 +230,14 @@ func resolveUploadDir(ctx context.Context) string {
 	fallback := os.TempDir()
 	logger.Warnf(ctx, "no usable upload spool dir; falling back to %s — this is often tmpfs (RAM-backed) and will OOM on multi-GiB pushes. Set EPOCH_UPLOAD_DIR to a real-disk path.", fallback)
 	return fallback
+}
+
+// resolveMaxStreamingUploads caps concurrent streaming uploads; size to mem_limit / 256 MiB.
+func resolveMaxStreamingUploads(raw string) int {
+	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+		return n
+	}
+	return defaultMaxStreamingUploads
 }
 
 func newHTTPServer(ctx context.Context, addr string, handler http.Handler) *http.Server {

@@ -111,6 +111,13 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	release, ok := s.acquireStreamSlot(r.Context())
+	if !ok {
+		log.WithFunc("server.persistMonolithicUpload").Debugf(r.Context(), "upload canceled while queued for a streaming slot")
+		return
+	}
+	defer release()
+
 	hasher := sha256.New()
 	body := io.TeeReader(io.LimitReader(r.Body, uploadBodyLimit), hasher)
 	if err := s.reg.PushBlobStreaming(r.Context(), dgst, body, r.ContentLength); err != nil {
@@ -137,6 +144,20 @@ func (s *Server) discardCorruptBlob(ctx context.Context, digest string) {
 	if err := s.reg.DeleteBlob(ctx, digest); err != nil {
 		log.WithFunc("server.discardCorruptBlob").Errorf(ctx, err,
 			"delete corrupt blob sha256:%s failed; digest key holds unverified bytes the dedup path will trust", digest)
+	}
+}
+
+// acquireStreamSlot blocks for one of the bounded streaming-upload slots so
+// concurrent 256 MiB uploads can't exhaust memory; ok is false if ctx ends first.
+func (s *Server) acquireStreamSlot(ctx context.Context) (release func(), ok bool) {
+	if s.streamSem == nil {
+		return func() {}, true // unbounded when built without New
+	}
+	select {
+	case s.streamSem <- struct{}{}:
+		return func() { <-s.streamSem }, true
+	case <-ctx.Done():
+		return nil, false
 	}
 }
 
