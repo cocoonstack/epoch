@@ -11,20 +11,11 @@ import (
 	"github.com/cocoonstack/epoch/manifest"
 )
 
-const defaultBlobRedirectTTL = time.Hour
-
-// resolveBlobRedirectTTL parses EPOCH_BLOB_REDIRECT_TTL, falling back to the
-// default for empty, unparseable, or non-positive values.
-func resolveBlobRedirectTTL(raw string) time.Duration {
-	if raw == "" {
-		return defaultBlobRedirectTTL
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d <= 0 {
-		return defaultBlobRedirectTTL
-	}
-	return d
-}
+const (
+	defaultBlobRedirectTTL = time.Hour
+	// maxBlobRedirectTTL is the presign expiry cap; over it every presign fails.
+	maxBlobRedirectTTL = 7 * 24 * time.Hour
+)
 
 func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
@@ -53,12 +44,12 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, body)
 }
 
-// redirectBlob points the client at a presigned object-store URL so blob bytes
-// flow directly from storage instead of being proxied through this process.
-// Returns false without writing a response when the blob can't be redirected,
-// so v2GetBlob falls back to streaming.
+// redirectBlob 307s the client to a presigned URL. Returns false without
+// writing a response when it can't, so v2GetBlob falls back to streaming.
 func (s *Server) redirectBlob(w http.ResponseWriter, r *http.Request, dgst string) bool {
 	logger := log.WithFunc("server.redirectBlob")
+	// presign succeeds even for a missing object, so HEAD first to return an
+	// OCI BLOB_UNKNOWN rather than 307 to a backend 404.
 	exists, err := s.reg.BlobExists(r.Context(), dgst)
 	if err != nil {
 		logger.Warnf(r.Context(), "blob exists check for %s failed, falling back to proxy: %v", dgst, err)
@@ -105,4 +96,12 @@ func (s *Server) v2PutBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.persistMonolithicUpload(w, r, name, "sha256:"+dgst)
+}
+
+// clampBlobRedirectTTL keeps a TTL in the presign-valid range: sub-1s → default, over-7d → cap.
+func clampBlobRedirectTTL(d time.Duration) time.Duration {
+	if d < time.Second {
+		return defaultBlobRedirectTTL
+	}
+	return min(d, maxBlobRedirectTTL)
 }

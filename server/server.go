@@ -9,10 +9,10 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	commonhttpx "github.com/cocoonstack/cocoon-common/httpx"
+	commonk8s "github.com/cocoonstack/cocoon-common/k8s"
 	"github.com/gorilla/mux"
 	"github.com/projecteru2/core/log"
 
@@ -30,11 +30,11 @@ var _ http.ResponseWriter = (*responseWriter)(nil)
 
 // Server is the Epoch HTTP server providing OCI Distribution and control plane APIs.
 type Server struct {
-	addr            string     // config
-	registryToken   string     // config — Bearer token for /v2/ (empty = no token required)
-	sso             *SSOConfig // config — nil = UI auth disabled
-	blobRedirect    bool       // config — redirect blob GETs to presigned object-store URLs
-	blobRedirectTTL time.Duration
+	addr            string        // config
+	registryToken   string        // config — Bearer token for /v2/ (empty = no token required)
+	sso             *SSOConfig    // config — nil = UI auth disabled
+	blobRedirect    bool          // config — redirect blob GETs to presigned object-store URLs
+	blobRedirectTTL time.Duration // config — presigned redirect URL lifetime
 
 	reg   *registry.Registry // resources
 	store *store.Store       // resources
@@ -57,8 +57,8 @@ func New(ctx context.Context, reg *registry.Registry, st *store.Store, addr stri
 	if regToken != "" {
 		logger.Info(ctx, "registry token auth enabled")
 	}
-	blobRedirect, _ := strconv.ParseBool(os.Getenv("EPOCH_BLOB_REDIRECT"))
-	blobRedirectTTL := resolveBlobRedirectTTL(os.Getenv("EPOCH_BLOB_REDIRECT_TTL"))
+	blobRedirect := commonk8s.EnvBool("EPOCH_BLOB_REDIRECT", false)
+	blobRedirectTTL := clampBlobRedirectTTL(commonk8s.EnvDuration("EPOCH_BLOB_REDIRECT_TTL", defaultBlobRedirectTTL))
 	if blobRedirect {
 		logger.Infof(ctx, "blob redirect enabled, ttl=%s", blobRedirectTTL)
 	}

@@ -58,8 +58,7 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, size int64
 	return nil
 }
 
-// PresignGet returns a time-limited URL that lets a client GET the object
-// directly from the backing store, bypassing this process.
+// PresignGet returns a time-limited URL for a direct GET, bypassing this process.
 func (c *Client) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	u, err := c.client.PresignedGetObject(ctx, c.cfg.Bucket, c.fullKey(key), ttl, nil)
 	if err != nil {
