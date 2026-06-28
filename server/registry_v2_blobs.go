@@ -4,12 +4,25 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
+
+	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/epoch/manifest"
 )
 
+const (
+	defaultBlobRedirectTTL = time.Hour
+	// maxBlobRedirectTTL is the presign expiry cap; over it every presign fails.
+	maxBlobRedirectTTL = 7 * 24 * time.Hour
+)
+
 func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	dgst := stripSHA256Prefix(urlVar(r, "digest"))
+
+	if s.blobRedirect && s.redirectBlob(w, r, dgst) {
+		return
+	}
 
 	body, size, err := s.reg.StreamBlob(r.Context(), dgst)
 	if err != nil {
@@ -29,6 +42,31 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, body)
+}
+
+// redirectBlob 307s the client to a presigned URL. Returns false without
+// writing a response when it can't, so v2GetBlob falls back to streaming.
+func (s *Server) redirectBlob(w http.ResponseWriter, r *http.Request, dgst string) bool {
+	logger := log.WithFunc("server.redirectBlob")
+	// presign succeeds even for a missing object, so HEAD first to return an
+	// OCI BLOB_UNKNOWN rather than 307 to a backend 404.
+	exists, err := s.reg.BlobExists(r.Context(), dgst)
+	if err != nil {
+		logger.Warnf(r.Context(), "blob exists check for %s failed, falling back to proxy: %v", dgst, err)
+		return false
+	}
+	if !exists {
+		v2Error(w, http.StatusNotFound, "BLOB_UNKNOWN", "blob not found")
+		return true
+	}
+	url, err := s.reg.PresignBlobGet(r.Context(), dgst, s.blobRedirectTTL)
+	if err != nil {
+		logger.Warnf(r.Context(), "presign blob %s failed, falling back to proxy: %v", dgst, err)
+		return false
+	}
+	w.Header().Set("Docker-Content-Digest", "sha256:"+dgst)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+	return true
 }
 
 func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
@@ -58,4 +96,12 @@ func (s *Server) v2PutBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.persistMonolithicUpload(w, r, name, "sha256:"+dgst)
+}
+
+// clampBlobRedirectTTL keeps a TTL in the presign-valid range: sub-1s → default, over-7d → cap.
+func clampBlobRedirectTTL(d time.Duration) time.Duration {
+	if d < time.Second {
+		return defaultBlobRedirectTTL
+	}
+	return min(d, maxBlobRedirectTTL)
 }

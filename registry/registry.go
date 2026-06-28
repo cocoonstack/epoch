@@ -74,6 +74,11 @@ func (r *Registry) StreamBlob(ctx context.Context, digest string) (io.ReadCloser
 	return r.client.Get(ctx, blobKey(digest))
 }
 
+// PresignBlobGet returns a time-limited URL for a direct blob GET.
+func (r *Registry) PresignBlobGet(ctx context.Context, digest string, ttl time.Duration) (string, error) {
+	return r.client.PresignGet(ctx, blobKey(digest), ttl)
+}
+
 // BlobSize returns the size of a blob in bytes.
 func (r *Registry) BlobSize(ctx context.Context, digest string) (int64, error) {
 	return r.client.Head(ctx, blobKey(digest))

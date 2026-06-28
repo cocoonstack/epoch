@@ -68,6 +68,13 @@ spec:
             # (tmpfs in most clusters) and OOMs on multi-GiB pushes.
             - name: EPOCH_UPLOAD_DIR
               value: /var/cache/epoch/uploads
+            # 307-redirect blob GETs to presigned URLs so multi-GiB bytes
+            # bypass this pod.
+            - name: EPOCH_BLOB_REDIRECT
+              value: "true"
+            # Optional redirect URL lifetime, Go duration (default 1h, max 7d).
+            # - name: EPOCH_BLOB_REDIRECT_TTL
+            #   value: "1h"
             # Optional: absolute base URL clients reach the server at. Used
             # to anchor the OCI WWW-Authenticate realm + /v2/token. Required
             # when fronting epoch with a proxy that does NOT set
@@ -131,11 +138,11 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
               cpu: "1"
-              memory: 512Mi
+              memory: 1Gi
+            limits:
+              cpu: "3"
+              memory: 4Gi
           volumeMounts:
             - name: upload-spool
               mountPath: /var/cache/epoch/uploads
