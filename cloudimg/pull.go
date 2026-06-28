@@ -7,6 +7,8 @@ import (
 	"io"
 )
 
+var _ BlobReader = blobReaderAdapter{}
+
 // Downloader abstracts OCI manifest and blob downloads.
 type Downloader interface {
 	GetManifest(ctx context.Context, name, tag string) ([]byte, string, error)
@@ -74,7 +76,6 @@ type blobReaderAdapter struct {
 	dl   Downloader
 }
 
-// ReadBlob downloads a blob by digest via the underlying Downloader.
 func (a blobReaderAdapter) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
 	return a.dl.GetBlob(ctx, a.name, digest)
 }

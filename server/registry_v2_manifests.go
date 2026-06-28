@@ -19,16 +19,6 @@ func (s *Server) loadManifestRaw(r *http.Request, name, ref string) ([]byte, err
 	return s.reg.ManifestJSON(r.Context(), name, ref)
 }
 
-func detectManifestMediaType(data []byte) string {
-	var probe struct {
-		MediaType string `json:"mediaType"`
-	}
-	if err := json.Unmarshal(data, &probe); err == nil && probe.MediaType != "" {
-		return probe.MediaType
-	}
-	return defaultManifestMediaType
-}
-
 func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
 	ref := urlVar(r, "reference")
@@ -43,10 +33,7 @@ func (s *Server) v2GetManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := utils.SHA256Hex(data)
-	w.Header().Set("Content-Type", detectManifestMediaType(data))
-	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	setManifestHeaders(w, data)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data) //nolint:gosec // raw registry manifest bytes, not HTML rendering
 }
@@ -65,10 +52,7 @@ func (s *Server) v2HeadManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	digest := utils.SHA256Hex(data)
-	w.Header().Set("Content-Type", detectManifestMediaType(data))
-	w.Header().Set("Docker-Content-Digest", "sha256:"+digest)
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	setManifestHeaders(w, data)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -129,4 +113,20 @@ func (s *Server) v2PutManifest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, ref))
 	w.WriteHeader(http.StatusCreated)
+}
+
+func detectManifestMediaType(data []byte) string {
+	var probe struct {
+		MediaType string `json:"mediaType"`
+	}
+	if err := json.Unmarshal(data, &probe); err == nil && probe.MediaType != "" {
+		return probe.MediaType
+	}
+	return defaultManifestMediaType
+}
+
+func setManifestHeaders(w http.ResponseWriter, data []byte) {
+	w.Header().Set("Content-Type", detectManifestMediaType(data))
+	w.Header().Set("Docker-Content-Digest", "sha256:"+utils.SHA256Hex(data))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 }

@@ -96,12 +96,13 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 // object: epoch's read path does not re-hash, so the digest key must only ever
 // hold verified bytes.
 func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
+	logger := log.WithFunc("server.persistMonolithicUpload")
 	dgst := stripSHA256Prefix(digest)
 
 	exists, err := s.reg.BlobExists(r.Context(), dgst)
 	if err != nil {
 		// fail closed: streaming on could overwrite then delete an existing blob.
-		log.WithFunc("server.persistMonolithicUpload").Errorf(r.Context(), err, "blob exists check for sha256:%s failed", dgst)
+		logger.Errorf(r.Context(), err, "blob exists check for sha256:%s failed", dgst)
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -113,7 +114,7 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 
 	release, ok := s.acquireStreamSlot(r.Context())
 	if !ok {
-		log.WithFunc("server.persistMonolithicUpload").Debugf(r.Context(), "upload canceled while queued for a streaming slot")
+		logger.Debug(r.Context(), "upload canceled while queued for a streaming slot")
 		return
 	}
 	defer release()
@@ -121,7 +122,7 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 	hasher := sha256.New()
 	body := io.TeeReader(io.LimitReader(r.Body, uploadBodyLimit), hasher)
 	if err := s.reg.PushBlobStreaming(r.Context(), dgst, body, r.ContentLength); err != nil {
-		log.WithFunc("server.persistMonolithicUpload").Errorf(r.Context(), err, "stream blob sha256:%s (content-length=%d) failed", dgst, r.ContentLength)
+		logger.Errorf(r.Context(), err, "stream blob sha256:%s (content-length=%d) failed", dgst, r.ContentLength)
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}

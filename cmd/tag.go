@@ -28,7 +28,7 @@ repository names must match).`,
 
 			client, err := newRegistryClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("create registry client: %w", err)
 			}
 			data, contentType, err := client.GetManifest(ctx, srcName, srcTag)
 			if err != nil {

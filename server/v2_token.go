@@ -13,31 +13,6 @@ const (
 	tokenLifetimeSeconds = 3600
 )
 
-func publicBaseURL(r *http.Request) string {
-	if env := strings.TrimRight(strings.TrimSpace(os.Getenv(publicURLEnvVar)), "/"); env != "" {
-		return env
-	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		first, _, _ := strings.Cut(proto, ",")
-		scheme = strings.ToLower(strings.TrimSpace(first))
-	}
-	host := r.Host
-	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
-		first, _, _ := strings.Cut(h, ",")
-		host = strings.TrimSpace(first)
-	}
-	return scheme + "://" + host
-}
-
-func wwwAuthenticateChallenge(r *http.Request) string {
-	realm := publicBaseURL(r) + "/v2/token"
-	return `Bearer realm="` + realm + `",service="` + tokenServiceName + `"`
-}
-
 type tokenResponse struct {
 	Token       string `json:"token"`
 	AccessToken string `json:"access_token"` //nolint:tagliatelle // OCI Distribution spec field name
@@ -68,6 +43,44 @@ func (s *Server) v2Token(w http.ResponseWriter, r *http.Request) {
 	s.writeTokenResponse(w, candidate)
 }
 
+func (s *Server) tokenIsValid(r *http.Request, candidate string) bool {
+	return candidate != "" && s.isValidToken(r.Context(), candidate)
+}
+
+func (s *Server) writeTokenResponse(w http.ResponseWriter, token string) {
+	writeJSON(w, http.StatusOK, tokenResponse{
+		Token:       token,
+		AccessToken: token,
+		ExpiresIn:   tokenLifetimeSeconds,
+		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func publicBaseURL(r *http.Request) string {
+	if env := strings.TrimRight(strings.TrimSpace(os.Getenv(publicURLEnvVar)), "/"); env != "" {
+		return env
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		first, _, _ := strings.Cut(proto, ",")
+		scheme = strings.ToLower(strings.TrimSpace(first))
+	}
+	host := r.Host
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		first, _, _ := strings.Cut(h, ",")
+		host = strings.TrimSpace(first)
+	}
+	return scheme + "://" + host
+}
+
+func wwwAuthenticateChallenge(r *http.Request) string {
+	realm := publicBaseURL(r) + "/v2/token"
+	return `Bearer realm="` + realm + `",service="` + tokenServiceName + `"`
+}
+
 func extractTokenCandidate(r *http.Request) string {
 	if _, password, ok := r.BasicAuth(); ok && password != "" {
 		return password
@@ -80,17 +93,4 @@ func extractTokenCandidate(r *http.Request) string {
 		return v
 	}
 	return ""
-}
-
-func (s *Server) tokenIsValid(r *http.Request, candidate string) bool {
-	return candidate != "" && s.isValidToken(r.Context(), candidate)
-}
-
-func (s *Server) writeTokenResponse(w http.ResponseWriter, token string) {
-	writeJSON(w, http.StatusOK, tokenResponse{
-		Token:       token,
-		AccessToken: token,
-		ExpiresIn:   tokenLifetimeSeconds,
-		IssuedAt:    time.Now().UTC().Format(time.RFC3339),
-	})
 }

@@ -28,7 +28,7 @@ func newLsCmd() *cobra.Command {
 func lsRepos(ctx context.Context) error {
 	client, err := newRegistryClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("create registry client: %w", err)
 	}
 	repos, err := client.Catalog(ctx)
 	if err != nil {
@@ -48,7 +48,7 @@ func lsRepos(ctx context.Context) error {
 func lsTags(ctx context.Context, name string) error {
 	client, err := newRegistryClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("create registry client: %w", err)
 	}
 	tags, err := client.ListTags(ctx, name)
 	if err != nil {

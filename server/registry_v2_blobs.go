@@ -30,6 +30,7 @@ func (s *Server) v2GetBlob(w http.ResponseWriter, r *http.Request) {
 			v2Error(w, http.StatusNotFound, "BLOB_UNKNOWN", "blob not found")
 			return
 		}
+		log.WithFunc("server.v2GetBlob").Errorf(r.Context(), err, "stream blob sha256:%s failed", dgst)
 		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
@@ -78,6 +79,7 @@ func (s *Server) v2HeadBlob(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		log.WithFunc("server.v2HeadBlob").Errorf(r.Context(), err, "blob size sha256:%s failed", dgst)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

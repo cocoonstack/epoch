@@ -188,14 +188,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
-	hd := strings.ToLower(userHD)
-	emailLower := strings.ToLower(email)
-	return slices.ContainsFunc(allowed, func(d string) bool {
-		return (hd != "" && hd == d) || strings.HasSuffix(emailLower, "@"+d)
-	})
-}
-
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	sess := s.getSession(r)
 	if sess == nil {
@@ -203,4 +195,12 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"user": sess.User, "email": sess.Email})
+}
+
+func userMatchesHostedDomain(userHD, email string, allowed []string) bool {
+	hd := strings.ToLower(userHD)
+	emailLower := strings.ToLower(email)
+	return slices.ContainsFunc(allowed, func(d string) bool {
+		return (hd != "" && hd == d) || strings.HasSuffix(emailLower, "@"+d)
+	})
 }

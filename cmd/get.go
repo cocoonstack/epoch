@@ -14,6 +14,18 @@ import (
 	"github.com/cocoonstack/epoch/utils"
 )
 
+var _ cloudimg.BlobReader = (*httpBlobReader)(nil)
+
+type httpBlobReader struct {
+	client *registryclient.Client
+	name   string
+}
+
+// ReadBlob downloads a blob by digest from the remote registry.
+func (h *httpBlobReader) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
+	return h.client.GetBlob(ctx, h.name, digest)
+}
+
 func newGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <name>[:<tag>]",
@@ -39,7 +51,7 @@ Examples:
 
 			client, err := newRegistryClient()
 			if err != nil {
-				return err
+				return fmt.Errorf("create registry client: %w", err)
 			}
 			raw, _, err := client.GetManifest(ctx, name, tag)
 			if err != nil {
@@ -56,14 +68,4 @@ Examples:
 			return cloudimg.Stream(ctx, raw, &httpBlobReader{client: client, name: name}, os.Stdout)
 		},
 	}
-}
-
-type httpBlobReader struct {
-	client *registryclient.Client
-	name   string
-}
-
-// ReadBlob downloads a blob by digest from the remote registry.
-func (h *httpBlobReader) ReadBlob(ctx context.Context, digest string) (io.ReadCloser, error) {
-	return h.client.GetBlob(ctx, h.name, digest)
 }

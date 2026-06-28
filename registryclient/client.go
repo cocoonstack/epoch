@@ -119,7 +119,7 @@ func (c *Client) GetManifest(ctx context.Context, name, tag string) ([]byte, str
 	defer func() { _ = resp.Body.Close() }()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		// fall through
+		// ok, read the body below
 	case http.StatusNotFound:
 		return nil, "", fmt.Errorf("%s %s: %w", http.MethodGet, rawURL, ErrManifestNotFound)
 	default:

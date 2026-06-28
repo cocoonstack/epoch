@@ -46,19 +46,24 @@ func LoadSSOConfig(ctx context.Context) *SSOConfig {
 
 	cfg := loadProviderConfig(provider)
 	if cfg == nil || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURI == "" || cfg.AuthorizeURL == "" || cfg.TokenURL == "" || cfg.UserInfoURL == "" {
-		logger.Infof(ctx, "sso disabled: incomplete %s configuration", provider)
+		logger.Warnf(ctx, "sso disabled: incomplete %s configuration", provider)
 		return nil
 	}
 
 	secret := os.Getenv("SSO_COOKIE_SECRET")
 	var cookieKey []byte
 	if secret != "" {
-		cookieKey, _ = hex.DecodeString(secret)
+		key, err := hex.DecodeString(secret)
+		if err != nil {
+			logger.Warnf(ctx, "SSO_COOKIE_SECRET is not valid hex, generating a random key: %v", err)
+		} else {
+			cookieKey = key
+		}
 	}
 	if len(cookieKey) == 0 {
 		cookieKey = make([]byte, 32)
 		_, _ = rand.Read(cookieKey)
-		logger.Info(ctx, "no SSO_COOKIE_SECRET set, generated random key")
+		logger.Warn(ctx, "no SSO_COOKIE_SECRET set, generated random key")
 	}
 	cfg.CookieSecret = cookieKey
 	return cfg

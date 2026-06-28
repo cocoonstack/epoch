@@ -138,7 +138,7 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 		Recursive: true,
 	}) {
 		if object.Err != nil {
-			return nil, object.Err
+			return nil, fmt.Errorf("list %s: %w", prefix, object.Err)
 		}
 		key := object.Key
 		if c.cfg.Prefix != "" {

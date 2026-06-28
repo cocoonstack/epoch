@@ -93,10 +93,7 @@ func (s *Store) ValidateToken(ctx context.Context, plaintext string) bool {
 
 // InvalidateTokenCache clears all cached token validation results.
 func (s *Store) InvalidateTokenCache() {
-	s.tokenCache.Range(func(key, _ any) bool {
-		s.tokenCache.Delete(key)
-		return true
-	})
+	s.tokenCache.Clear()
 }
 
 func (s *Store) startTokenCacheCleanup(ctx context.Context) {

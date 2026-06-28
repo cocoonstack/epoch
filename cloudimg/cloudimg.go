@@ -22,7 +22,7 @@ type BlobReader interface {
 func Stream(ctx context.Context, raw []byte, blobs BlobReader, w io.Writer) error {
 	m, err := manifest.Parse(raw)
 	if err != nil {
-		return err
+		return fmt.Errorf("parse manifest: %w", err)
 	}
 	if kind := manifest.ClassifyParsed(m); kind != manifest.KindCloudImage {
 		return fmt.Errorf("manifest is %s, not a cloud image", kind)

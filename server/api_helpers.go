@@ -11,7 +11,7 @@ import (
 	"github.com/cocoonstack/epoch/store"
 )
 
-func tagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[string]any {
+func buildTagResponse(t *store.Tag, snapshotConfig *manifest.SnapshotConfig) map[string]any {
 	resp := map[string]any{
 		"repoName":     t.RepoName,
 		"tag":          t.Name,

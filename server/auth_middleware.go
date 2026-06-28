@@ -20,23 +20,6 @@ var (
 	publicPathPrefixes = []string{"/dl/"}
 )
 
-func isPublicPath(path string) bool {
-	if publicExactPaths[path] {
-		return true
-	}
-	return slices.ContainsFunc(publicPathPrefixes, func(p string) bool {
-		return strings.HasPrefix(path, p)
-	})
-}
-
-func isV2WriteMethod(method string) bool {
-	switch method {
-	case http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete:
-		return true
-	}
-	return false
-}
-
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -64,15 +47,10 @@ func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handl
 			next.ServeHTTP(w, r)
 			return
 		}
-		w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
-		v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+		challengeBearer(w, r, "authentication required")
 		return
 	}
-	if !isV2WriteMethod(r.Method) {
-		next.ServeHTTP(w, r)
-		return
-	}
-	if !s.v2WritesRequireAuth() {
+	if !isV2WriteMethod(r.Method) || !s.v2WritesRequireAuth() {
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -80,8 +58,7 @@ func (s *Server) serveV2(w http.ResponseWriter, r *http.Request, next http.Handl
 		next.ServeHTTP(w, r)
 		return
 	}
-	w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
-	v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "valid Bearer token required")
+	challengeBearer(w, r, "valid Bearer token required")
 }
 
 func (s *Server) serveUIOrAPI(w http.ResponseWriter, r *http.Request, next http.Handler) {
@@ -108,15 +85,6 @@ func (s *Server) v2WritesRequireAuth() bool {
 	return s.registryToken != "" || s.store != nil
 }
 
-func bearerToken(r *http.Request) string {
-	header := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(header, "Bearer ")
-	if token == "" || token == header {
-		return ""
-	}
-	return token
-}
-
 // isValidToken reports whether candidate is an accepted registry
 // token. The static-token comparison is constant-time so an attacker
 // cannot probe the token via timing.
@@ -140,4 +108,35 @@ func (s *Server) validateBearer(r *http.Request) bool {
 func (s *Server) validateAPIBearer(r *http.Request) bool {
 	token := bearerToken(r)
 	return token != "" && s.store != nil && s.store.ValidateToken(r.Context(), token)
+}
+
+func isPublicPath(path string) bool {
+	if publicExactPaths[path] {
+		return true
+	}
+	return slices.ContainsFunc(publicPathPrefixes, func(p string) bool {
+		return strings.HasPrefix(path, p)
+	})
+}
+
+func isV2WriteMethod(method string) bool {
+	switch method {
+	case http.MethodPut, http.MethodPost, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+func bearerToken(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(header, "Bearer ")
+	if token == "" || token == header {
+		return ""
+	}
+	return token
+}
+
+func challengeBearer(w http.ResponseWriter, r *http.Request, msg string) {
+	w.Header().Set("WWW-Authenticate", wwwAuthenticateChallenge(r))
+	v2Error(w, http.StatusUnauthorized, "UNAUTHORIZED", msg)
 }

@@ -28,8 +28,8 @@ type Registry struct {
 	client *objectstore.Client
 
 	catalogMu     sync.Mutex // guards read-modify-write of catalog.json
-	catalogCache  []byte     // cached catalog.json bytes
-	catalogExpiry time.Time  // expiry of catalogCache
+	catalogCache  []byte
+	catalogExpiry time.Time
 }
 
 // New creates a Registry backed by the given object store client.
@@ -214,19 +214,14 @@ func (r *Registry) GetCatalogWithDigest(ctx context.Context) (*manifest.Catalog,
 	if err != nil {
 		return nil, "", err
 	}
+	cat, err := parseCatalog(raw)
+	if err != nil {
+		return nil, "", err
+	}
 	if raw == nil {
-		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, "", nil
+		return cat, "", nil
 	}
-
-	var cat manifest.Catalog
-	if err := json.Unmarshal(raw, &cat); err != nil {
-		return nil, "", fmt.Errorf("decode catalog: %w", err)
-	}
-	if cat.Repositories == nil {
-		cat.Repositories = make(map[string]*manifest.Repository)
-	}
-
-	return &cat, utils.SHA256Hex(raw), nil
+	return cat, utils.SHA256Hex(raw), nil
 }
 
 // getCatalogRaw acquires catalogMu; use getCatalogRawLocked if already held.
@@ -264,19 +259,9 @@ func (r *Registry) getCatalogRawLocked(ctx context.Context) ([]byte, error) {
 func (r *Registry) getCatalogLocked(ctx context.Context) (*manifest.Catalog, error) {
 	raw, err := r.getCatalogRawLocked(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get catalog: %w", err)
+		return nil, err
 	}
-	if raw == nil {
-		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
-	}
-	var cat manifest.Catalog
-	if err := json.Unmarshal(raw, &cat); err != nil {
-		return nil, fmt.Errorf("decode catalog: %w", err)
-	}
-	if cat.Repositories == nil {
-		cat.Repositories = make(map[string]*manifest.Repository)
-	}
-	return &cat, nil
+	return parseCatalog(raw)
 }
 
 // unlinkTagsByDigest removes every tag under name whose content hashes to
@@ -320,7 +305,7 @@ func (r *Registry) updateCatalog(ctx context.Context, name, tag string) error {
 
 	cat, err := r.getCatalogLocked(ctx)
 	if err != nil {
-		return fmt.Errorf("get catalog: %w", err)
+		return err
 	}
 
 	repo, ok := cat.Repositories[name]
@@ -395,4 +380,20 @@ func tagFromKey(key, repoPrefix string) (string, bool) {
 		return "", false
 	}
 	return tag, true
+}
+
+// parseCatalog decodes catalog bytes, returning an empty catalog for nil input
+// and defaulting a missing Repositories map so callers can write to it directly.
+func parseCatalog(raw []byte) (*manifest.Catalog, error) {
+	if raw == nil {
+		return &manifest.Catalog{Repositories: make(map[string]*manifest.Repository)}, nil
+	}
+	var cat manifest.Catalog
+	if err := json.Unmarshal(raw, &cat); err != nil {
+		return nil, fmt.Errorf("decode catalog: %w", err)
+	}
+	if cat.Repositories == nil {
+		cat.Repositories = make(map[string]*manifest.Repository)
+	}
+	return &cat, nil
 }

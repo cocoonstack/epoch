@@ -14,6 +14,21 @@ import (
 
 const defaultTag = "latest"
 
+var (
+	_ cloudimg.BlobReader = (*registryBlobReader)(nil)
+	_ snapshot.Downloader = (*registryDownloader)(nil)
+)
+
+type blobStreamer interface {
+	StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error)
+}
+
+type manifestStreamer interface {
+	blobStreamer
+	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
+	ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error)
+}
+
 type registryBlobReader struct {
 	reg blobStreamer
 }
@@ -46,6 +61,12 @@ func (d *registryDownloader) GetManifest(ctx context.Context, name, tag string) 
 	return raw, "", err
 }
 
+// GetBlob downloads a blob by digest from the registry object store.
+func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.ReadCloser, error) {
+	body, _, err := d.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
+	return body, err
+}
+
 // fetchManifest routes sha256:-prefixed tags to ManifestJSONByDigest
 // so image-index child fetches resolve correctly; bare tags fall back
 // to ManifestJSON, defaulting an empty tag to "latest".
@@ -57,12 +78,6 @@ func (d *registryDownloader) fetchManifest(ctx context.Context, name, tag string
 		return d.reg.ManifestJSONByDigest(ctx, name, tag)
 	}
 	return d.reg.ManifestJSON(ctx, name, tag)
-}
-
-// GetBlob downloads a blob by digest from the registry object store.
-func (d *registryDownloader) GetBlob(ctx context.Context, _, digest string) (io.ReadCloser, error) {
-	body, _, err := d.reg.StreamBlob(ctx, stripSHA256Prefix(digest))
-	return body, err
 }
 
 // handleArtifactDownload streams a cloud image or snapshot. Auth-exempt.
@@ -130,16 +145,6 @@ func (s *Server) fetchManifestWithLegacyFallback(r *http.Request, name, ref stri
 	return legacy, legacyName, defaultTag, nil
 }
 
-type blobStreamer interface {
-	StreamBlob(ctx context.Context, digest string) (io.ReadCloser, int64, error)
-}
-
-type manifestStreamer interface {
-	blobStreamer
-	ManifestJSON(ctx context.Context, name, tag string) ([]byte, error)
-	ManifestJSONByDigest(ctx context.Context, name, digest string) ([]byte, error)
-}
-
 func (s *Server) streamCloudImage(w http.ResponseWriter, r *http.Request, name string, m *manifest.OCIManifest) {
 	streamWithPreflight(r.Context(), w, manifest.MediaTypeGeneric,
 		func(out io.Writer) error {
@@ -175,7 +180,7 @@ func streamWithPreflight(ctx context.Context, w http.ResponseWriter, contentType
 
 	var first [1]byte
 	n, err := io.ReadFull(pr, first[:])
-	if err != nil || n == 0 {
+	if err != nil {
 		logger.Errorf(ctx, err, "%s %s (preflight)", errCtx, name)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		_ = pr.Close()

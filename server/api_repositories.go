@@ -79,7 +79,7 @@ func (s *Server) apiGetTag(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, tagResponse(t, snapshotConfig))
+	writeJSON(w, http.StatusOK, buildTagResponse(t, snapshotConfig))
 }
 
 func (s *Server) loadSnapshotConfig(ctx context.Context, name, manifestJSON string) (*manifest.SnapshotConfig, error) {
