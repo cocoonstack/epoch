@@ -15,6 +15,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// blobUploadPartSize/blobUploadThreads bound PutStreaming memory at
+// partSize*threads while keeping concurrency for multi-GiB blobs.
+const (
+	blobUploadPartSize = uint64(64) << 20
+	blobUploadThreads  = uint(4)
+)
+
 // ErrNotFound is returned when a requested object does not exist.
 var ErrNotFound = errors.New("not found")
 
@@ -54,6 +61,21 @@ func (c *Client) Put(ctx context.Context, key string, body io.Reader, size int64
 	})
 	if err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
+	}
+	return nil
+}
+
+// PutStreaming uploads body to key via concurrent multipart without buffering
+// the whole object, reading from a non-seekable source.
+func (c *Client) PutStreaming(ctx context.Context, key string, body io.Reader, size int64) error {
+	_, err := c.client.PutObject(ctx, c.cfg.Bucket, c.fullKey(key), body, size, minio.PutObjectOptions{
+		ContentType:           "application/octet-stream",
+		PartSize:              blobUploadPartSize,
+		NumThreads:            blobUploadThreads,
+		ConcurrentStreamParts: true,
+	})
+	if err != nil {
+		return fmt.Errorf("put streaming %s: %w", key, err)
 	}
 	return nil
 }
