@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -8,11 +9,18 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/projecteru2/core/log"
 )
 
-const uploadBodyLimit = defaultUploadMaxBytes
+const (
+	uploadBodyLimit = defaultUploadMaxBytes
+
+	// discardBlobTimeout bounds the detached corrupt-blob delete; the object
+	// store layer imposes no request timeout of its own.
+	discardBlobTimeout = 30 * time.Second
+)
 
 func (s *Server) v2InitBlobUpload(w http.ResponseWriter, r *http.Request) {
 	name := urlVar(r, "name")
@@ -83,17 +91,22 @@ func (s *Server) v2CompleteBlobUpload(w http.ResponseWriter, r *http.Request) {
 	s.persistVerifiedBlob(w, r, name, digest, fu)
 }
 
-// persistMonolithicUpload streams a single-PUT blob (digest known up front)
-// straight to the object store while hashing inline — no disk spool, receive
-// and upload overlap. The digest is verified after the stream drains; a
-// mismatch deletes the object so the content-addressed key never keeps
-// unverified bytes (the verify happens the instant the upload completes, so the
-// window is negligible and content-addressing protects readers regardless).
+// persistMonolithicUpload streams a single-PUT blob straight to the digest key
+// while hashing inline (no disk spool), then verifies. A mismatch discards the
+// object: epoch's read path does not re-hash, so the digest key must only ever
+// hold verified bytes.
 func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request, name, digest string) {
 	dgst := stripSHA256Prefix(digest)
 
-	if exists, err := s.reg.BlobExists(r.Context(), dgst); err == nil && exists {
-		drainBody(r.Body)
+	exists, err := s.reg.BlobExists(r.Context(), dgst)
+	if err != nil {
+		// fail closed: streaming on could overwrite then delete an existing blob.
+		log.WithFunc("server.persistMonolithicUpload").Errorf(r.Context(), err, "blob exists check for sha256:%s failed", dgst)
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+	if exists {
+		drainBody(r.Body) // keep the connection reusable
 		s.blobCreated(w, name, digest)
 		return
 	}
@@ -102,17 +115,29 @@ func (s *Server) persistMonolithicUpload(w http.ResponseWriter, r *http.Request,
 	body := io.TeeReader(io.LimitReader(r.Body, uploadBodyLimit), hasher)
 	if err := s.reg.PushBlobStreaming(r.Context(), dgst, body, r.ContentLength); err != nil {
 		log.WithFunc("server.persistMonolithicUpload").Errorf(r.Context(), err, "stream blob sha256:%s (content-length=%d) failed", dgst, r.ContentLength)
-		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_INVALID", err.Error())
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 
 	if got := "sha256:" + hex.EncodeToString(hasher.Sum(nil)); got != digest {
-		_ = s.reg.DeleteBlob(r.Context(), dgst)
+		s.discardCorruptBlob(r.Context(), dgst)
 		v2Error(w, http.StatusBadRequest, "DIGEST_INVALID",
 			fmt.Sprintf("digest mismatch: got %s, expected %s", got, digest))
 		return
 	}
 	s.blobCreated(w, name, digest)
+}
+
+// discardCorruptBlob deletes a digest-mismatched blob on a detached, bounded
+// context: a delete suppressed by request cancellation would leave unverified
+// bytes the dedup path later trusts. A failure is logged for a backstop sweep.
+func (s *Server) discardCorruptBlob(ctx context.Context, digest string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), discardBlobTimeout)
+	defer cancel()
+	if err := s.reg.DeleteBlob(ctx, digest); err != nil {
+		log.WithFunc("server.discardCorruptBlob").Errorf(ctx, err,
+			"delete corrupt blob sha256:%s failed; digest key holds unverified bytes the dedup path will trust", digest)
+	}
 }
 
 // persistVerifiedBlob verifies the digest then streams to the object store.
@@ -133,7 +158,7 @@ func (s *Server) persistVerifiedBlob(w http.ResponseWriter, r *http.Request, nam
 	}
 	if err := s.reg.PushBlobFromStream(r.Context(), stripSHA256Prefix(digest), rdr, fu.Size()); err != nil {
 		log.WithFunc("server.persistVerifiedBlob").Errorf(r.Context(), err, "push spooled blob %s (size=%d) failed", digest, fu.Size())
-		v2Error(w, http.StatusInternalServerError, "BLOB_UPLOAD_INVALID", err.Error())
+		v2Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
 	s.blobCreated(w, name, digest)
